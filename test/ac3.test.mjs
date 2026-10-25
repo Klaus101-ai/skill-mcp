@@ -49,20 +49,20 @@ test("AC3 gate: case endings match through stemming («договора» vs «�
   assert.equal(results[0].name, "skill-lease");
 });
 
-test("relative threshold: one weak meaningful token among absent ones is cut", () => {
+test("coverage rule: N=3 with one matched token is not enough — the result is cut", () => {
   const idx = buildIndex([skill("skill-flowers", "цветы и полив подоконника")]);
-  // the gate PASSES this («цветы» really occurs) — the ceiling check then
-  // rejects it: two of three meaningful tokens are absent from the corpus.
+  // «цветы» really occurs (token equality holds), but a lone token never
+  // proves the topic: 1 < min(2, 3) → empty answer (M7, no score floor).
   assert.deepEqual(search(idx, "цветы гонконг фуникулер", { limit: 5 }), []);
 });
 
-test("relative threshold: matching every meaningful token (or the only one) is kept", () => {
+test("coverage rule: N=3 fully covered, and N=1 covered by its only token — both kept", () => {
   const idx = buildIndex([skill("skill-mixed", "цветы гонконг фуникулер уход")]);
   assert.ok(search(idx, "цветы гонконг фуникулер", { limit: 5 }).length >= 1, "full match must survive");
-  assert.ok(search(idx, "цветы", { limit: 5 }).length >= 1, "single-token match must survive");
+  assert.ok(search(idx, "цветы", { limit: 5 }).length >= 1, "N=1 needs its single token (min(2, 1) = 1)");
 });
 
-test("gate + threshold do not break restrict_to", () => {
+test("gate + coverage do not break restrict_to", () => {
   const idx = buildIndex([
     skill("skill-a", "zebra operations manual"),
     skill("skill-b", "zebra operations manual"),
@@ -114,6 +114,80 @@ test("M6 why: a field is credited only on token equality, never on a substring",
   const results = search(idx, "office", { limit: 5 });
   assert.equal(results.length, 1);
   assert.equal(results[0].why, "matched description: office");
+});
+
+// ── M7: standard stop list + coverage rule (no score threshold) ─────────────
+
+test("M7 coverage N=0: only service words → nothing can prove a match → []", () => {
+  const idx = buildIndex([
+    skill("skill-bus", "bus timetable airport transfer"),
+    skill("skill-office", "office supplies and coffee"),
+  ]);
+  assert.deepEqual(search(idx, "when what should", { limit: 5 }), [], "en service words alone");
+  assert.deepEqual(search(idx, "когда что как почему", { limit: 5 }), [], "ru service words alone");
+  assert.deepEqual(search(idx, "the of and for with is", { limit: 5 }), [], "M5 short list still holds");
+});
+
+test("M7 coverage N=2: one shared token is cut, two matched tokens are kept", () => {
+  const one = buildIndex([skill("skill-office", "office supplies catalog")]);
+  assert.deepEqual(search(one, "office coffee", { limit: 5 }), [], "1 of 2 meaningful tokens proves nothing");
+  const both = buildIndex([skill("skill-coffee", "office coffee machine")]);
+  assert.equal(search(both, "office coffee", { limit: 5 }).length, 1, "2 of 2 = minimal proof");
+});
+
+test("M7 coverage: «office» alone does not answer a 3-token query (AC3 #59 shape)", () => {
+  const idx = buildIndex([
+    skill("skill-supplies", "office supplies restocking"),
+    skill("skill-beans", "office coffee brewing"),
+  ]);
+  // «office coffee» is covered by skill-beans only; the single-«office» skill
+  // is cut, and skill-supplies never proves «coffee»/«buy».
+  const results = search(idx, "What coffee should I buy for the office", { limit: 5 });
+  assert.deepEqual(results.map((r) => r.name), ["skill-beans"], "only the covered skill survives");
+  // the same query with «office» as its ONLY meaningful token still works
+  assert.equal(search(idx, "office", { limit: 5 }).length, 2, "N=1 needs just its one token (both hold it)");
+});
+
+test("M7 coverage N=5: regression «договор аренды офис депозит продление»", () => {
+  const good = buildIndex([
+    skill("skill-lease", "договор аренды офиса: депозит и продление"),
+    skill("skill-unrelated", "совсем другой текст про котов"),
+  ]);
+  assert.equal(
+    search(good, "договор аренды офис депозит продление", { limit: 5 })[0]?.name,
+    "skill-lease",
+    "the real answer must pass the coverage rule",
+  );
+  const weak = buildIndex([skill("skill-contract", "договор только про котов")]);
+  assert.deepEqual(
+    search(weak, "договор аренды офис депозит продление", { limit: 5 }),
+    [],
+    "1 of 5 meaningful tokens is not coverage",
+  );
+});
+
+test("M7 coverage: the AC3 junk queries lose their service-word tokens", () => {
+  const idx = buildIndex([
+    skill("skill-when", "guidance for when the build breaks"), // «when» only
+    skill("skill-next", "the next release checklist"), // «next» only
+  ]);
+  // #58: significant tokens are bus/airport — absent from every skill text.
+  assert.deepEqual(search(idx, "When is the next bus to the airport", { limit: 5 }), []);
+  // #59: «should»/«what» are service words; «office» alone covers nothing here.
+  assert.deepEqual(search(idx, "What coffee should I buy for the office", { limit: 5 }), []);
+});
+
+test("M7: scores rank the list, they never validate it (no MIN_STRENGTH left)", () => {
+  // two docs sharing 2 of 2 tokens are both kept regardless of their scores:
+  // a weak-but-covered second hit is returned, not silently dropped.
+  const idx = buildIndex([
+    skill("skill-strong", "zebra operations manual"),
+    skill("skill-weak", "zebra operations with far more words around it"),
+  ]);
+  const results = search(idx, "zebra operations", { limit: 5 });
+  assert.equal(results.length, 2, "both covered results survive");
+  assert.ok(results[0].score >= results[1].score, "order is still by score");
+  assert.ok(results.every((r) => /zebra/.test(r.why)), "both report their real match");
 });
 
 // ── the plugin simply shows nothing on the same gate ────────────────────────

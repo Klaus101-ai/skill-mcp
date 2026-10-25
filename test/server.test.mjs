@@ -214,7 +214,7 @@ test("MCP: find / outline / read-section contracts and validation", async () => 
     assert.deepEqual(empty, { ok: true, items: [], note: "пустой запрос" });
 
     // find: AC3 — meaningful tokens of this query are in no skill text
-    // (gate + relative floor in core search) -> the documented empty answer.
+    // (M7 coverage gate in core search) -> the documented empty answer.
     const noMatch = payloadOf(
       await s.request("tools/call", { name: "find", arguments: { query: "Как сварить борщ с говядиной" } }),
     );

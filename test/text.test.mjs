@@ -109,10 +109,9 @@ test("M6 isShortAcronym: letters only, 2-3 of them, upper case, whitelisted", ()
 });
 
 test("significantQueryTokens: length >= 3, not a stop word, stems deduplicated", () => {
-  // «как» qualifies (3 chars, absent from the frozen stop list) — per spec;
-  // «с» (1 char) and «с»-class stop words do not.
+  // M7: «как» is a standard service word — it no longer proves anything;
+  // «с» (1 char) and the stop words «на/по/во/о» do not either.
   assert.deepEqual(significantQueryTokens("Как сварить борщ с говядиной"), [
-    "как",
     "сварить",
     "борщ",
     "говядин",
@@ -125,5 +124,57 @@ test("significantQueryTokens: length >= 3, not a stop word, stems deduplicated",
   for (const t of significantQueryTokens("Проверь договор аренды офис")) {
     assert.ok(t.length >= 3, `short significant token: ${t}`);
     assert.ok(!STOP_WORDS.has(t), `stop word as significant token: ${t}`);
+  }
+});
+
+// ── M7: the standard service-word list ──────────────────────────────────────
+
+// The M7 spec list, verbatim — every member must be a stop word (checked in
+// its normalized form, so «моё»/«ещё» match their ё→е spellings).
+const M7_STOP_EN = [
+  "when", "what", "which", "who", "whom", "whose", "why", "how", "should", "would",
+  "could", "can", "will", "shall", "may", "might", "must", "do", "does", "did", "done",
+  "is", "am", "are", "was", "were", "be", "been", "being", "this", "that", "these",
+  "those", "there", "here", "then", "than", "so", "such", "just", "very", "also",
+  "about", "into", "over", "under", "after", "before", "between", "again", "more",
+  "most", "some", "any", "all", "no", "not", "only", "own", "same", "too", "up",
+  "down", "out", "off", "i", "me", "my", "we", "us", "our", "you", "your", "he",
+  "she", "it", "they", "them", "their", "its", "and", "or", "but", "if", "because",
+  "as", "at", "by", "from", "in", "of", "on", "to", "with", "without", "next",
+  "new", "using", "use",
+];
+const M7_STOP_RU = [
+  "когда", "что", "какой", "какие", "как", "почему", "зачем", "где", "кто", "чтобы",
+  "если", "или", "но", "а", "же", "ли", "бы", "для", "при", "без", "под", "над",
+  "про", "через", "между", "после", "перед", "также", "уже", "ещё", "очень", "только",
+  "надо", "нужно", "можно", "есть", "был", "была", "было", "были", "будет",
+  "этот", "эта", "это", "эти", "тот", "та", "то", "те", "мой", "моя", "моё", "мои",
+  "наш", "наша", "наше", "наши", "свой", "своя", "свои", "самый",
+];
+
+test("M7 stop list: every spec member is a stop word (ru + en)", () => {
+  for (const w of M7_STOP_EN) assert.ok(STOP_WORDS.has(w), `EN stop word missing: ${w}`);
+  for (const w of M7_STOP_RU) assert.ok(STOP_WORDS.has(normalizeTerm(w)), `RU stop word missing: ${w}`);
+  // the M5/M6 short list is a SUBSET — nothing was dropped when M7 expanded it
+  for (const w of ["a", "an", "the", "for", "и", "в", "во", "на", "по", "с", "со", "к", "о", "об", "от", "до", "за", "из", "не"]) {
+    assert.ok(STOP_WORDS.has(w), `M5/M6 stop word lost in M7: ${w}`);
+  }
+});
+
+test("M7 stop list: when/what/should count as significant zero, subject words do not", () => {
+  // the AC3 junk queries #58/#59 lose their service-word tokens
+  assert.deepEqual(significantQueryTokens("When is the next bus to the airport"), ["bus", "airport"]);
+  assert.deepEqual(significantQueryTokens("What coffee should I buy for the office"), ["coffee", "buy", "office"]);
+  assert.deepEqual(significantQueryTokens("when what should"), [], "service words alone prove nothing");
+  assert.deepEqual(significantQueryTokens("why should we do this that"), []);
+  assert.deepEqual(significantQueryTokens("когда что какой как почему зачем"), []);
+  assert.deepEqual(significantQueryTokens("нужно можно только уже этот"), []);
+  // subject words stay significant — the list is service words only
+  for (const w of ["review", "check", "audit", "policy", "contract"]) {
+    assert.deepEqual(significantQueryTokens(w), [w], `${w} must stay significant`);
+  }
+  for (const w of ["договор", "проверь", "аудит", "политика"]) {
+    assert.equal(significantQueryTokens(w).length, 1, `${w} must stay significant`);
+    assert.ok(!STOP_WORDS.has(normalizeTerm(w)), `${w} must not be a stop word`);
   }
 });

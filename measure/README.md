@@ -20,9 +20,13 @@ can no longer serve as an honest "untouched" test: M5 changes are **verified**
 against it (that is what a validation set is for). From M5 on:
 
 - **set A = validation**: normal iteration happens here — a change is judged by
-  its before/after table on A. Queries, qrels and stop words still never change;
-  weights and the threshold may only be selected through a *measured comparison
-  on A* with the numbers recorded below (M5 § Weights, M5 § Threshold).
+  its before/after table on A. Queries and qrels never change; weights are only
+  selected through a *measured comparison on A* with the numbers recorded below
+  (M5 § Weights). Two one-time, task-driven exceptions, both recorded in the
+  reports: the stop list was extended to the standard service-word list in M7
+  (the set files themselves stayed byte-identical), and the score threshold was
+  **abolished** in M7 in favour of the coverage rule (M7 § Rule) — so there is
+  no threshold left to select.
 - **set B = acceptance (deferred, honest)**: an independent agent will build a
   fresh held-out set B later, with no knowledge of these numbers, and acceptance
   runs there. The formulations in `heldout.jsonl` are **not** modified — the file
@@ -50,18 +54,25 @@ against it (that is what a validation set is for). From M5 on:
    The same pipeline is injected into MiniSearch as `tokenize` + `processTerm`,
    which MiniSearch applies to documents **and** to query strings — one code
    path, no drift between index and query.
-2. **AC3 significant-match gate**: a result is valid only if at least one
-   meaningful query token (≥3 chars, not in the frozen ru+en stop list, not
-   punctuation — judged after normalization/stemming) really occurs in that
-   skill's name+description+headings. If no skill passes, `search()` returns
-   `[]` — the MCP `find` turns that into
+2. **AC3 significant-match gate**: a result is valid only if it covers enough
+   meaningful query tokens — **`≥ min(2, N)`** since M7, where N is the number
+   of meaningful tokens (≥3 chars or an upper-case whitelisted acronym, not in
+   the standard service-word stop list, judged after
+   normalization/stemming); M5–M6 asked for **at least one**. If no skill
+   covers enough, `search()` returns `[]` — the MCP `find` turns that into
    `{"ok":true,"items":[],"note":"ничего не найдено"}` and the plugin hint
    simply emits no block (both call the same `search()`).
-3. **Relative noise floor** (see M5 § Threshold below; re-derived in M6).
+3. **Relative noise floor** (see M5 § Threshold below; re-derived in M6) —
+   **abolished in M7**, see § M7.
 
 M6 amended steps 1–2: words are token-level (`next.js` stays one word, a
 hyphen splits), `why` attributes a field by token equality, and upper-case
 short acronyms became meaningful — see § M6.
+
+**M7 amended step 2 and removed step 3**: the stop list became the standard
+service-word list, and "at least one matched token" became the **coverage
+rule** `matched ≥ min(2, N)`; the score floor (`MIN_STRENGTH` +
+`corpusCeiling`) is gone — see § M7.
 
 Stop words and short tokens are still indexed and still contribute to BM25
 scores (scoring semantics were not part of M5); they only lose the right to
@@ -104,7 +115,12 @@ all@5 then NDCG@10, easy/hard must not regress against the incumbent. **Winner:
 name ×3 / description ×2 / headings ×1** — it wins recall@5 *and* all@5, so the
 M4 weights are kept (re-confirmed against two candidates, not assumed).
 
-## M5 § Threshold (relative noise floor)
+## M5 § Threshold (relative noise floor) — HISTORICAL, abolished by M7
+
+> **M7 status:** this section and § M6 § Threshold describe a mechanism that
+> **no longer exists**: M7 deleted `MIN_STRENGTH` and `corpusCeiling` and
+> replaced the floor with the coverage rule (§ M7 § Rule). Kept verbatim as
+> the record of how the 0.7 value was derived while it existed.
 
 After the gate, leftovers still existed on A (9/10 non-empty), e.g. a doc whose
 only overlap with «Как сварить борщ с говядиной» is the word «как». The floor:
@@ -227,7 +243,10 @@ Effect on set A: exactly 4 queries gain a token — #23 `AI`, #44 `UI`, #45 `UX`
 #47 `AI`. #23/#44/#45 keep ratios 6.33 / 2.92 / 3.51 (far above the floor);
 #47 see § M6 § Threshold.
 
-### M6 § Threshold (MIN_STRENGTH re-derived)
+### M6 § Threshold (MIN_STRENGTH re-derived) — HISTORICAL, abolished by M7
+
+> **M7 status:** the mechanism below was deleted in M7 (coverage rule, § M7).
+> Kept verbatim as the record of the last derivation done while it existed.
 
 The floor is still **needed**: without it 9 of the 10 `empty` queries return a
 non-empty list (only #52 fails the gate), i.e. AC3 would be 9/10, not 10/10 —
@@ -263,6 +282,109 @@ to a single id).
 | draft set (28) product recall@5 | 0.9643 (27/28, MISS #13) | 0.9643 (27/28, MISS #13) |
 | warm search p95 | 1.68 ms | 2.38 ms (token-level `why` attribution; 2.3–3.0 ms across runs, ≤150 ms budget unaffected) |
 | weights winner | name ×3 / desc ×2 / head ×1 | unchanged (re-run, same winner) |
+
+## M7 § Standard stop list + coverage rule (threshold removed)
+
+### The rule (the whole validation story now)
+
+Two changes, both task-driven, no measurement behind either of them:
+
+1. **Stop list → the standard service words** (`core/text.mjs`
+   `RAW_STOP_WORDS`, folded through the same `normalizeTerm` as the query
+   side): English *when what which who whom whose why how should would could
+   can will shall may might must do does did done is am are was were be been
+   being this that these those there here then than so such just very also
+   about into over under after before between again more most some any all no
+   not only own same too up down out off i me my we us our you your he she it
+   they them their its and or but if because as at by from in of on to with
+   without next new using use* + Russian *когда что какой какие как почему
+   зачем где кто чтобы если или но а же ли бы для при без под над про через
+   между после перед также уже ещё очень только надо нужно можно есть был
+   была было были будет этот эта это эти тот та то те мой моя моё мои наш
+   наша наше наши свой своя свои самый*. The short M5/M6 list (`a an the for
+   и в во на по с со к о об от до за из не`) is a **subset** — nothing was
+   removed, the set only grew. Subject words are not in it: *review, check,
+   audit, policy, contract, договор, проверь, аудит, политика* stay
+   significant (tested). Exception kept from M6: a whitelisted **upper-case
+   acronym** (`IT`) stays meaningful — case still separates it from the
+   pronoun `it`, which is a stop word.
+
+2. **Coverage rule instead of `MIN_STRENGTH`** (`core/index.mjs`): with
+   `N` = number of significant query tokens, a result is valid iff it matches
+   by token equality at least `min(2, N)` of them; otherwise the answer is
+   `[]` → MCP `find` `{ok:true, items:[], note:"ничего не найдено"}` and no
+   plugin block — one rule for both consumers. `MIN_STRENGTH`, `BM25_SATURATION`
+   and `corpusCeiling` were **deleted**, so no score threshold exists: scores
+   only order the list, they never decide whether it is returned.
+
+**Why 2:** one shared word does not prove a topic — that is precisely how the
+junk AC3 queries got answers (a lone «office», a lone «when»); two matched
+tokens are the minimal sign that a skill really speaks about the request. A
+query of 1–2 meaningful tokens is proven by one of them (`min(2, N)`), so a
+short precise query («договор», «zebra») is never over-tightened; `N = 0`
+(service words only) has nothing to prove with → `[]`. This is a *rule* with
+a stated rationale, not a value fitted to a measured gap — nothing here has to
+be re-derived when the corpus or the query set changes.
+
+### M5 → M6 → M7 (set A, same commands)
+
+| metric | M5 | M6 | **M7** |
+|---|---|---|---|
+| easy recall@5 / all@5 | 0.7714 / 0.7714 | 0.7714 / 0.7714 | **0.7714 / 0.7714** |
+| easy NDCG@10 | 0.6660 | 0.6660 | **0.6814** |
+| hard recall@5 / all@5 | 0.6000 / 0.2667 | 0.6000 / 0.2667 | **0.7333 / 0.2667** (11/15 vs 9/15) |
+| hard NDCG@10 | 0.4996 | 0.4996 | **0.5349** |
+| ALL recall@5 / all@5 | 0.7200 / 0.6200 | 0.7200 / 0.6200 | **0.7600 / 0.6200** |
+| ALL NDCG@10 | 0.6161 | 0.6161 | **0.6375** |
+| AC3 non-empty | 2/10 (#58, #59) | 2/10 (#58, #59) | **0/10 — 10/10 closed** |
+| draft set (28) product recall@5 | 0.9643 (27/28, MISS #13) | 0.9643 (27/28, MISS #13) | **1.0000 (28/28)** |
+| warm search p95 | 1.68 ms | 2.38 ms | **2.14 ms** |
+| weights winner | 3/2/1 | 3/2/1 | **3/2/1 (re-run, same winner; no candidate beats it)** |
+| score threshold | `MIN_STRENGTH`=0.7 | 0.7 | **none (deleted)** |
+
+Product recall@5 stays ≥ baseline in every row (0.7600 vs 0.7000).
+
+### Answers gained / lost (the mandatory honesty check)
+
+Compared **per query** against the M6 run (temporary `_m7_state.mjs`, the
+exact `search()` call, same 365-skill index; before/after dumps kept only in
+the report, script deleted):
+
+- **Lost (had qrels, became empty): NONE.** No query answered in M6 returns
+  `[]` in M7 — the coverage rule removed no relevant answer on set A. Also
+  **no query went hit@5 → MISS and none lost its qrel from the top-10.**
+- **New hits@5 (this is the hard-recall jump 0.6000 → 0.7333, 9/15 → 11/15):**
+  #38 «Мы продаём долю в ООО — проверь черновики документов…»
+  (`share-deal-review` at rank 4) and #48 «Extract all dates, amounts and
+  owners from the batch of incoming contracts…» (`tabular-review` at rank 4)
+  — the coverage filter drops non-covering leftovers, so the real answer
+  rises into the top-5 instead of being crowded out.
+- **Top-10 gain:** #28 «From my last git history pull out real
+  achievements…» — `star-story-extractor` moved from outside the top-10 into
+  it (NDCG effect; still not top-5, so not a recall change).
+- **Were `[]` under the M6 floor, now return a list — but still miss (no
+  metric change, they were misses before too):** #4 (→ renewal-tracker,
+  construction-contract-review; qrel `pretensia-draft` not in top-10),
+  #40 (→ video-promo; qrels not in top-10), #47 (→ ai-usage-rules, cold-
+  start-interview-ai-governance …; both qrels not in top-10). **#47 stated
+  plainly:** its qrels overlap the query on ONE meaningful token (`ai`) out
+  of nine, so `min(2, 9) = 2` cuts them — the M6 floor cut them too (as `[]`),
+  so this is not a regression, but the coverage rule does **not** rescue
+  #47 either; reported as a known limitation of the rule, not tuned away.
+- **Still empty with qrels: #14 only** («Найди, почему сайт грузится дольше,
+  чем надо», qrel `performance-optimization`): it was already `[]` in M6 (by
+  the floor) and stays `[]` in M7 because no skill covers 2 of its five
+  meaningful tokens (`найд, сайт, грузитс, дольш, чем`). It was a miss in M6
+  too — no metric moved because of it.
+- AC3 #58/#59: their service words (`when`, `next`, `what`, `should`) are
+  stop words now and their topic words (`bus`, `airport`, `coffee`, `buy`)
+  occur in no skill text — both are cut at the gate, not by a floor.
+
+### Checks run for M7
+
+`npm test` → 92 tests, 91 pass, 1 skipped (symlink EPERM, unchanged),
+0 fail. `node measure/run.mjs`, `node measure/latency.mjs` (p95 2.14 ms),
+`node measure/weights.mjs` (winner unchanged), draft set 28 → 1.0000.
 
 ## Latency (`latency.mjs`)
 

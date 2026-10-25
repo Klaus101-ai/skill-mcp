@@ -13,41 +13,27 @@ const FIELD_BOOST = { name: 3, description: 2, headings: 1 };
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
-// --- relative noise floor (M5 item 4, re-derived in M6) ---------------------
-// A result list survives only when its BEST score reaches MIN_STRENGTH of the
-// corpus ceiling for this query. The ceiling is, per meaningful query token,
-// the best score that token achieves anywhere in the corpus (a one-term
-// search, quality multiplier = 1), plus a theoretical BM25 upper bound for a
-// token that occurs in NO skill: idf at df = 0, saturation (d + k + 1) and the
-// largest field boost of the current weight set. The theoretical part keeps a
-// query whose rare tokens are absent from the corpus from getting a tiny
-// denominator for free.
+// --- coverage rule (M7; replaces the M5/M6 score floor) ---------------------
+// A result is valid only when it COVERS enough of the query's meaningful
+// tokens: the number of matched significant tokens (token equality after the
+// shared normalization/stemming pipeline — MiniSearch `r.match` keys) must be
+// >= min(MIN_COVERAGE, N), where N = the number of significant query tokens.
+// The same single rule serves the MCP `find` and the plugin hint (both call
+// search()); when no result covers enough, the answer is [] and the MCP tool
+// answers {ok:true, items:[], note:"ничего не найдено"}.
 //
-// MIN_STRENGTH = 0.7 re-derived on set A AFTER the M6 token-level match and
-// the acronym whitelist (measure/README.md § M6 § Threshold):
-//   - biggest `empty`-query ratio that still must be cut: 0.6658 (#57);
-//   - weakest ratio among the qrel answers that are kept: 0.7171 (#32);
-//   - 0.7 is again the largest round value inside that measured gap.
-// Known and reported (NOT tuned away): #47 sits at 0.4967 because its query
-// carries three corpus-absent tokens; the floor keeps answering it with [],
-// same as in M5 — lowering the floor to rescue it would re-admit empty #57
-// (0.6658) and #55 (0.5015), so it is an owner decision, not a code change.
-const MIN_STRENGTH = 0.7;
-const BM25_SATURATION = 0.5 + 1.2 + 1; // d + (k + 1) with k=1.2, b irrelevant at tf -> inf
-
-function corpusCeiling(index, sig, boost) {
-  // public getter in minisearch 7.x (`get documentCount()`)
-  const docs = Number.isFinite(index.documentCount) ? index.documentCount : 0;
-  const idfAtZeroDf = Math.log(1 + (docs + 0.5) / 0.5);
-  const maxBoost = Math.max(1, ...Object.values(boost));
-  const absentTokenBound = idfAtZeroDf * BM25_SATURATION * maxBoost;
-  let sum = 0;
-  for (const t of sig) {
-    const best = index.search(t, { boost }); // one-term query: pure contribution
-    sum += best.length > 0 ? best[0].score : absentTokenBound;
-  }
-  return sum;
-}
+// Why 2 (rationale in README.md § AC3, "why two tokens"): one lone matched
+// word is never proof of the topic — it is exactly how the junk queries got
+// their answers («office», «when», a single shared token); two matched tokens
+// are the minimal sign that a skill really talks about the request. Queries
+// made of 1–2 meaningful tokens are proven by one of them (min(2, N)), so a
+// short, precise query is never over-tightened. N = 0 (only stop words and
+// short/acronym-less tokens) can be proven by nothing at all → [].
+//
+// There is deliberately NO score threshold left: scores still RANK the list,
+// they no longer VALIDATE it, so nothing is derived from a measured gap on
+// set A and no number has to be re-derived when the corpus changes.
+const MIN_COVERAGE = 2;
 
 function significantTerms(terms) {
   const out = [];
@@ -202,18 +188,21 @@ export function selectWinner(candidates) {
  * duplicate skill names collapsed to their best-scoring entry.
  * Empty / whitespace-only / punctuation-only queries return [].
  *
- * AC3 significant-match gate (M5 gate, M6 token-level match): the query
- * first yields its meaningful tokens (>= 3 chars or a whitelisted upper-case
- * acronym, not stop words, normalized + stemmed — core/text.mjs). If there
- * are none, or if no result document actually contains at least one EQUAL
- * token (same normalization/stemming — never a substring of a longer word;
+ * AC3 coverage gate (M5 gate, M6 token-level match, M7 coverage rule): the
+ * query first yields its meaningful tokens (>= 3 chars or a whitelisted
+ * upper-case acronym, not stop words, normalized + stemmed — core/text.mjs).
+ * If there are none, the answer is []. Otherwise a result document is kept
+ * only when it contains at least `min(MIN_COVERAGE, N)` of those tokens by
+ * EQUALITY (same normalization/stemming — never a substring of a longer word;
  * a dot keeps words together, a hyphen splits them) in
- * name/description/headings, the answer is []. MiniSearch's `r.match` lists
- * the document terms that matched this query, already normalized/stemmed by
- * the very same pipeline, so the containment check is exact and needs no
- * second index. This one gate is the whole AC3 story for every consumer: the
- * MCP `find` (note "ничего не найдено") and the plugin hint (no block) both
- * simply call `search()` and show nothing on [].
+ * name/description/headings. MiniSearch's `r.match` lists the document terms
+ * that matched this query, already normalized/stemmed by the very same
+ * pipeline, so the containment check is exact and needs no second index.
+ * Scores rank the surviving list but never validate it — there is no score
+ * threshold (M7 removed MIN_STRENGTH together with corpusCeiling). This one
+ * rule is the whole AC3 story for every consumer: the MCP `find`
+ * (note "ничего не найдено") and the plugin hint (no block) both simply call
+ * `search()` and show nothing on [].
  *
  * `boost` optionally overrides the field weights (used by measure/weights.mjs
  * to compare weight candidates on the A set without editing this file).
@@ -233,22 +222,22 @@ export function search(index, query, { limit = 5, restrict_to: restrictTo, boost
   }
 
   const matched = index.search(q, options);
-  // AC3 gate: keep a result only if at least one meaningful query token
-  // (stemmed) really occurs in this skill's indexed text.
+  // Coverage rule (M7): a result is valid only if it covers at least
+  // min(2, N) of the query's meaningful tokens (token equality after
+  // stemming). One shared token proves nothing; a 1–2-token query needs one.
+  const need = Math.min(MIN_COVERAGE, sig.length);
   const gated = matched.filter((r) => {
     const m = r.match;
     if (!m) return false;
-    return sig.some((t) => hasOwn(m, t));
+    let count = 0;
+    for (const t of sig) {
+      if (hasOwn(m, t)) count += 1;
+      if (count >= need) return true; // enough coverage, no need to scan on
+    }
+    return false;
   });
   gated.sort(compareResults);
   const unique = dedupeByName(gated);
-
-  // Relative noise floor (M5 item 4): a weak best score against the corpus
-  // ceiling means the "match" is noise — answer as if nothing was found.
-  if (unique.length > 0) {
-    const ceiling = corpusCeiling(index, sig, options.boost);
-    if (ceiling > 0 && unique[0].score < MIN_STRENGTH * ceiling) return [];
-  }
 
   const capped = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), unique.length) : unique.length;
 

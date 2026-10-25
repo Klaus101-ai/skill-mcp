@@ -62,12 +62,48 @@ export const MIN_STEM_LENGTH = 3;
 /** Safety valve: suffix cuts are chained until stable, but never endlessly. */
 const MAX_STEM_PASSES = 4;
 
-// Stop words (short ru+en list) — used by the `why` line (only significant
-// terms are shown) and by the AC3 gate (stop words never prove a match).
-export const STOP_WORDS = new Set([
-  "a", "an", "the", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are",
+// Stop words — the STANDARD list of service/function words (M7): everything
+// here is a grammatical or connective word that carries no topic of its own.
+// It REPLACES nothing: the short M5/M6 ru+en list is a subset of it, so the
+// set only grew (never shrank) when the standard list was applied in M7.
+// Subject words are never listed: review, check, audit, policy, contract,
+// договор, проверь, аудит, политика and the like stay significant.
+// Used by the `why` line (only significant terms are shown) and by the AC3
+// coverage gate (stop words never prove a match and never count toward N).
+// Every entry is folded through the SAME normalizeTerm the query side uses
+// (ё→е, case, punctuation), so membership is exact whatever form is written.
+const RAW_STOP_WORDS = [
+  // English service words
+  "when", "what", "which", "who", "whom", "whose", "why", "how",
+  "should", "would", "could", "can", "will", "shall", "may", "might", "must",
+  "do", "does", "did", "done", "is", "am", "are", "was", "were", "be", "been", "being",
+  "this", "that", "these", "those", "there", "here",
+  "then", "than", "so", "such", "just", "very", "also", "about",
+  "into", "over", "under", "after", "before", "between", "again",
+  "more", "most", "some", "any", "all", "no", "not", "only", "own", "same", "too",
+  "up", "down", "out", "off",
+  "i", "me", "my", "we", "us", "our", "you", "your", "he", "she", "it",
+  "they", "them", "their", "its",
+  "and", "or", "but", "if", "because", "as", "at", "by", "from",
+  "in", "of", "on", "to", "with", "without", "next", "new", "using", "use",
+  // short English list kept from M5/M6 (a subset check: a, an, the, for …)
+  "a", "an", "the", "for",
+  // Russian service words (M7 standard list)
+  "когда", "что", "какой", "какие", "как", "почему", "зачем", "где", "кто",
+  "чтобы", "если", "или", "но", "а", "же", "ли", "бы",
+  "для", "при", "без", "под", "над", "про", "через", "между", "после", "перед",
+  "также", "уже", "еще", "очень", "только",
+  "надо", "нужно", "можно", "есть",
+  "был", "была", "было", "были", "будет",
+  "этот", "эта", "это", "эти", "тот", "та", "то", "те",
+  "мой", "моя", "моё", "мои", "наш", "наша", "наше", "наши",
+  "свой", "своя", "свои", "самый",
+  // short Russian list kept from M5/M6 (и, в, во, на, по, с, со, к, о, об,
+  // от, до, за, из, не) — none of them is in the M7 list above
   "и", "в", "во", "на", "по", "с", "со", "к", "о", "об", "от", "до", "за", "из", "не",
-]);
+];
+
+export const STOP_WORDS = new Set(RAW_STOP_WORDS.map((w) => normalizeTerm(w)));
 
 // Endings cut by the stemmer (spec M5): RU common case/person/number endings,
 // EN -s/-es/-ing/-ed. Sorted longest first, then lexicographically, so the
@@ -159,6 +195,11 @@ export function processTerm(term) {
  * form is >= MIN_TOKEN_LENGTH chars and is not a stop word — or when the
  * token as written is a whitelisted upper-case acronym (M6: `AI`, `ML` …,
  * see SHORT_ACRONYMS); punctuation-only tokens never survive `tokenize`.
+ * The stop list (M7, standard service words) governs the ORDINARY usage of a
+ * word: the check is skipped for a whitelisted upper-case acronym, because
+ * case is exactly what separates `IT` (the acronym, M6) from `it` (the
+ * pronoun, a stop word) — lowercase `it` is already < 3 chars and never
+ * significant either way.
  * Returns [] when nothing meaningful is left — such a query cannot be
  * proven by any skill text and must yield [].
  */
@@ -169,7 +210,7 @@ export function significantQueryTokens(text) {
     const acronym = isShortAcronym(raw);
     const norm = normalizeTerm(raw);
     if (!acronym && norm.length < MIN_TOKEN_LENGTH) continue;
-    if (STOP_WORDS.has(norm)) continue;
+    if (!acronym && STOP_WORDS.has(norm)) continue;
     const stem = stemTerm(norm);
     if (!acronym && stem.length < MIN_TOKEN_LENGTH) continue;
     if (seen.has(stem)) continue;

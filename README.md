@@ -5,14 +5,15 @@ Local skill search and ranking for [opencode](https://opencode.ai). Indexes
 queries with a ranked list of matching skills. Everything runs locally:
 **no network, no LLM, no embeddings, no API keys, files are read-only.**
 
-Status: **M1 + M2 + M3 + M4 + M5 + M6** — core index, CLI smoke run, baseline
-evaluation, the **MCP server** (`server/`, stdio: `find` / `outline` /
+Status: **M1 + M2 + M3 + M4 + M5 + M6 + M7** — core index, CLI smoke run,
+baseline evaluation, the **MCP server** (`server/`, stdio: `find` / `outline` /
 `read-section`), the **context hint plugin** (`plugin/`, `<skill_hint>` block
 before model dispatch), the held-out evaluation (**set A = validation**), the
 **M5 pipeline** (normalization + light stemming, the AC3 significant-match gate
-and the relative noise floor) and the **M6 match semantics**: token-level
+and the relative noise floor), the **M6 match semantics**: token-level
 equality instead of substrings, the dot/hyphen word rule and the upper-case
-acronym whitelist.
+acronym whitelist, and the **M7 validation rule**: the score threshold is gone,
+replaced by a **coverage rule** over a **standard service-word stop list**.
 
 ## Requirements
 
@@ -59,16 +60,32 @@ const hits = search(index, "bug bounty report", { limit: 5 });
   `next.js` is ONE word (the query `next` does **not** match it), while a
   hyphen splits words: `gsap` matches `gsap-scrolltrigger`, and
   `AI-документ` yields the two tokens `AI` + `документ`.
-- **AC3 significant-match gate**: a result is valid only if at least one
-  meaningful query token — ≥3 chars, or an **upper-case whitelisted
+- **AC3 coverage rule (M7; replaces the M5/M6 score floor)**: a result is
+  valid only when it **covers enough of the query's meaningful tokens** —
+  at least `min(2, N)` of them, `N` = the number of meaningful query tokens.
+  A token is meaningful when it is ≥3 chars or an **upper-case whitelisted
   acronym** (`AI`, `ML`, `UI`, `UX`, `QA`, `PR`, `HR`, `IT`, `CI`, `CD`,
-  `DB`, `API`, `SDK`, `GPU`), not in the frozen ru+en stop list — is **equal**
-  to a token of the skill's `name`+`description`+`headings` (never a
-  substring of a longer word); otherwise `search()` returns `[]` — the MCP
+  `DB`, `API`, `SDK`, `GPU`), and is **not** a service word from the standard
+  stop list (English: `when what which who why how should would could can …`;
+  Russian: `когда что какой как почему где чтобы если или но для при …` —
+  full list in `core/text.mjs`; subject words such as *review, check, audit,
+  policy, contract, договор, проверь, аудит, политика* are never stop words).
+  The count uses **token equality** after stemming — never a substring of a
+  longer word. When nothing covers enough, `search()` returns `[]`: the MCP
   `find` answers `note: "ничего не найдено"` and the plugin simply shows no
-  block. A relative noise floor then rejects weak leftovers whose best score
-  is under 70% of the corpus ceiling for that query (re-derived after M6 with
-  the measured gap: [`measure/README.md`](measure/README.md) § M6 § Threshold).
+  block — **the same one rule for `find` and for the hint**.
+  **Why two tokens:** a single shared word is not proof of the topic — that is
+  exactly how junk queries used to get answers (one «office», one «when»);
+  two matched tokens are the minimal sign that a skill really talks about the
+  request. For a short query of 1–2 meaningful tokens one of them already
+  counts (`min(2, N)`), so a precise one-word query stays answerable; `N = 0`
+  (service words only) can be proven by nothing at all.
+  **No score threshold remains** (M7 deleted `MIN_STRENGTH` together with
+  `corpusCeiling`): scores still *rank* the surviving list, they no longer
+  *validate* it, so nothing is derived from a measured gap on set A and no
+  number has to be re-derived when the corpus changes. Measured effect on set
+  A: AC3 2/10 → 0/10 non-empty, hard recall@5 0.6000 → 0.7333, no query lost
+  its answer ([`measure/README.md`](measure/README.md) § M7).
 - Duplicate skill names (the same skill installed in several roots) collapse
   to the best-scoring entry; backup directories (`_backup`, `_backups`,
   `.backup`, `backup`) are never indexed.
@@ -78,8 +95,9 @@ const hits = search(index, "bug bounty report", { limit: 5 });
   field is credited only when it really contains an equal token — a substring
   does not count (`Officer` never proves `office`).
 - `restrict_to: ["name-or-glob*"]` filters results to an allowlist of skill names.
-- Empty / whitespace / punctuation-only queries — and queries with no
-  meaningful token that any skill text matches — return `[]`: no random hints.
+- Empty / whitespace / punctuation-only queries — and queries that no skill
+  text covers well enough under the coverage rule — return `[]`: no random
+  hints.
 - `skipped` lists `SKILL.md` symlinks whose real path escapes their root
   (`reason: "outside-root"`); `selectWinner` applies the shared
   "highest score, then lexicographically first path" rule.
@@ -264,9 +282,10 @@ See [`measure/README.md`](measure/README.md). Two roles, fixed in M5:
 - **set A** (`measure/heldout.jsonl`, commit `bbf9c74`) — independent, written
   by a different agent before any run; its M4 numbers are frozen, so from M5 it
   is the **validation set**: changes are verified here with a before/after
-  table. Queries, qrels and stop words never change; weights and the threshold
-  are chosen only through a measured comparison whose numbers are recorded in
-  `measure/README.md`.
+  table. Queries and qrels never change; the stop list was extended exactly
+  once, in M7, to the standard service-word list dictated by that task (the
+  set files themselves stayed byte-identical); weights are chosen only through
+  a measured comparison whose numbers are recorded in `measure/README.md`.
 - **set B** — the honest **acceptance** set: a fresh held-out set to be built
   later by an independent agent that has not seen these numbers.
 

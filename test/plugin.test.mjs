@@ -165,14 +165,18 @@ test("deny for an agent does not affect other agents (default = hint all)", () =
 
 test("allow: only listed skills are hinted; agent without allow is unrestricted", () => {
   const config = { deny: {}, allow: { tester: ["skill-beta"] } };
-  const tester = makeEvent("banana zebra manual");
+  // M7 coverage: «banana split» is N=2 and skill-beta covers both tokens.
+  const tester = makeEvent("banana split");
   newHook({ config })(tester);
   assert.equal(tester.system.length, 2);
   assert.deepEqual(entryNames(tester.system[1].text), ["skill-beta"]);
 
+  // M7 coverage: of «banana zebra manual» (N=3) skill-beta covers only
+  // «banana» — one token proves nothing — so only the two skills covering
+  // «zebra»+«manual» remain, and the default (no allow) hints those two.
   const other = makeEvent("banana zebra manual", { agent: "other-agent" });
   newHook({ config })(other);
-  assert.equal(entryNames(other.system[1].text).length, 2, "no allow list → up to 2 of the 3 matches");
+  assert.equal(entryNames(other.system[1].text).length, 2, "2 of the 3 matches pass the coverage rule");
 });
 
 // ── fail-open (R6) ──────────────────────────────────────────────────────────
