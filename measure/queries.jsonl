@@ -1,0 +1,28 @@
+{"id":1,"query":"review a commercial contract","relevant":["contract-review","review"]}
+{"id":2,"query":"bug bounty report submission","relevant":["bugbounty"]}
+{"id":3,"query":"resume review applicant tracking system","relevant":["resume-review","resume-ats-optimizer"]}
+{"id":4,"query":"write landing page copy that converts","relevant":["landing-page-copy","copywriting"]}
+{"id":5,"query":"gsap scroll triggered animation","relevant":["gsap-scrolltrigger","gsap-core"]}
+{"id":6,"query":"three js scene lighting setup","relevant":["threejs-lighting"]}
+{"id":7,"query":"draft a non disclosure agreement NDA","relevant":["nda-draft"]}
+{"id":8,"query":"create a new skill from a workflow","relevant":["skill-creator","skill-doc-authoring"]}
+{"id":9,"query":"юридическая справка на русском языке","relevant":["legal-docs-ru","analytical-brief"]}
+{"id":10,"query":"анализ тендерной документации 44-ФЗ","relevant":["tender-documentation-review"]}
+{"id":11,"query":"жалоба в ФАС на нарушение закупки","relevant":["fas-complaint-draft"]}
+{"id":12,"query":"optimize application performance","relevant":["performance-optimization"]}
+{"id":13,"query":"debug failing test systematically","relevant":["systematic-debugging","debugging-and-error-recovery"]}
+{"id":14,"query":"award winning landing page design","relevant":["awwwards","craft"]}
+{"id":15,"query":"cover letter for a job application","relevant":["cover-letter-writer","cover-letter-generator"]}
+{"id":16,"query":"accessibility audit of user interface","relevant":["impeccable","frontend-ui-engineering"]}
+{"id":17,"query":"security audit of the application","relevant":["security-audit"]}
+{"id":18,"query":"self hosted n8n docker deployment","relevant":["n8n-self-hosting"]}
+{"id":19,"query":"color palette and color theory","relevant":["color-expert"]}
+{"id":20,"query":"clean architecture backend service","relevant":["architecture-patterns","api-and-interface-design"]}
+{"id":21,"query":"code review before merging a pull request","relevant":["code-review-and-quality","requesting-code-review"]}
+{"id":22,"query":"обжалование постановления КоАП","relevant":["administrative-appeal","koap-violation-response"]}
+{"id":23,"query":"проверка договора поставки","relevant":["supply-contract-review"]}
+{"id":24,"query":"создать презентацию в фирменном стиле","relevant":["slides"]}
+{"id":25,"query":"playwright browser end to end testing","relevant":["webapp-testing","browser-testing-with-devtools"]}
+{"id":26,"query":"продающая промостраница на русском","relevant":["promo"]}
+{"id":27,"query":"Android проект каркас для RuStore","relevant":["android-skeleton"]}
+{"id":28,"query":"due diligence проверка контрагента","relevant":["diligence-issue-extraction","rnp-check"]}
