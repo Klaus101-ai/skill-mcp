@@ -1,0 +1,60 @@
+{"id":1,"query":"сверить договор найма квартиры","qrels":["lease-residential"],"kind":"easy"}
+{"id":2,"query":"егрн по квартире перед сделкой","qrels":["cadastre-check"],"kind":"easy"}
+{"id":3,"query":"выбрать режим налогобложения для ИП","qrels":["tax-system-choice"],"kind":"easy"}
+{"id":4,"query":"подготовить ответ на внепроверочный запрос налоговиков","qrels":["fns-correspondence"],"kind":"easy"}
+{"id":5,"query":"штраф по коап прикинуть","qrels":["fines-calculator"],"kind":"easy"}
+{"id":6,"query":"ddu к застройщику глянуть","qrels":["ddu-review"],"kind":"easy"}
+{"id":7,"query":"оценка ставки на ATI.SU","qrels":["atisu-api"],"kind":"easy"}
+{"id":8,"query":"собрать MCP-сервер на FastMCP","qrels":["mcp-builder"],"kind":"easy"}
+{"id":9,"query":"убрать фильм с пиратского сайта","qrels":["takedown"],"kind":"easy"}
+{"id":10,"query":"удалить мои данные из фирмы","qrels":["dsar-response"],"kind":"easy"}
+{"id":11,"query":"harden login endpoint before launch","qrels":["security-and-hardening"],"kind":"easy"}
+{"id":12,"query":"review teammate PR before merge","qrels":["code-review-and-quality"],"kind":"easy"}
+{"id":13,"query":"find root cause tests flaky today","qrels":["systematic-debugging"],"kind":"easy"}
+{"id":14,"query":"write the test first, coach me","qrels":["test-driven-development"],"kind":"easy"}
+{"id":15,"query":"add trace ids and structured logging","qrels":["observability-and-instrumentation"],"kind":"easy"}
+{"id":16,"query":"pre-launch checklist with rollback","qrels":["shipping-and-launch"],"kind":"easy"}
+{"id":17,"query":"make landing jury-grade","qrels":["awwwards"],"kind":"easy"}
+{"id":18,"query":"pick easing between app screens","qrels":["motion-design"],"kind":"easy"}
+{"id":19,"query":"pull competitor palette and fonts","qrels":["redesigner"],"kind":"easy"}
+{"id":20,"query":"rebrand cloned site to ours","qrels":["restyle"],"kind":"easy"}
+{"id":21,"query":"Планируем сокращение двух менеджеров по продажам. Какие шаги и сроки предусмотрены, чтобы потом не проиграть спор в суде?","qrels":["termination-review"],"kind":"easy"}
+{"id":22,"query":"Запишишь Марине Ивановой ежегодный отпуск с 3 по 30 июля, приказ вышел вчера","qrels":["log-leave"],"kind":"easy"}
+{"id":23,"query":"У нас чат-бот отвечает клиентам. Должны ли мы их предупреждать, что пишет нейросеть, а не оператор?","qrels":["user-disclosure-check"],"kind":"easy"}
+{"id":24,"query":"Нам вручили протокол об административном нарушении на саму фирму. Сколько времени на реакцию и что готовить, чтобы штраф вышел ниже?","qrels":["koap-violation-response"],"kind":"easy"}
+{"id":25,"query":"Перепиши документацию по правилам: неразрывные пробелы, длинные тире, кавычки ёлочки","qrels":["ru-text"],"kind":"easy"}
+{"id":26,"query":"Our campaign for the supplement says clinically proven and doctor recommended - check every claim against platform rules before we spend budget","qrels":["compliance-checker"],"kind":"easy"}
+{"id":27,"query":"The intro page of our pitch deck reads stiff and long-winded. Tighten it up without losing the core message","qrels":["copy-editing"],"kind":"easy"}
+{"id":28,"query":"I look invisible to recruiters despite posting weekly. Audit my headline, openings and skills for searchability","qrels":["linkedin-profile-optimizer"],"kind":"easy"}
+{"id":29,"query":"Run a realistic interview loop for a senior platform-engineer role, one question at a time, and grade me honestly in the end","qrels":["mock-interviewer"],"kind":"easy"}
+{"id":30,"query":"I have offers from two rivals. Research market bands and build a counter-offer script for the phone call","qrels":["salary-negotiation-prep"],"kind":"easy"}
+{"id":31,"query":"Выпустили новые приказы по 152-ФЗ - найдите, где наши внутренние регламенты разъехались с новой редакцией, и перепишите нужные места","qrels":["reg-gap-analysis","policy-redraft"],"kind":"hard"}
+{"id":32,"query":"Before we promote the CV-screening model to real users, map every AI system we run, then run the production-readiness gates on it","qrels":["ai-inventory","deployment-review"],"kind":"hard"}
+{"id":33,"query":"Build the disclosure schedule for the deal team: list our material contracts, tabulate their fields and categorize by kind","qrels":["tabular-review","material-contract-schedule"],"kind":"hard"}
+{"id":34,"query":"За два года к базовому договору вышло три допсоглашения - восстановите, что и когда меняли, и ничего ли мы не просрочили с окнами отказа","qrels":["amendment-history","renewal-tracker"],"kind":"hard"}
+{"id":35,"query":"Соберите взаимный NDA под сторонних разработчиков и сразу впишите, кому отходит код и тайны производства","qrels":["nda-draft","ip-clause-review"],"kind":"hard"}
+{"id":36,"query":"События рассыпаны по письмам и мессенджерам - выстройте хронологию с разметкой значимости и предложите, что закрепить как доказательства","qrels":["chronology","motion-evidence-collection"],"kind":"hard"}
+{"id":37,"query":"The offer letter our recruiter drafted busts approval limits and skips protected-category wording - flag the offending clauses and route the file to the right signer","qrels":["hiring-review","escalation-flagger"],"kind":"hard"}
+{"id":38,"query":"Собрание участников ООО: часть вопросов планируем решать опросом - отсеять недопустимые для заочной формы и собрать пакет уведомлений","qrels":["corporate-meeting-prep","written-consent"],"kind":"hard"}
+{"id":39,"query":"Someone posted an internal memo about our roadmap - open a formal probe with a proper workspace, interview plan and chain of custody","qrels":["internal-investigation","investigation-open"],"kind":"hard"}
+{"id":40,"query":"Регулятор запросил переписку с консультантами: организуйте сохранение всего массива и разложите, какие письма реально закрыты адвокатской тайной","qrels":["legal-hold","privilege-log-review"],"kind":"hard"}
+{"id":41,"query":"Onboarding a politically connected wealthy client with ties in two countries - set up the enhanced-diligence flow for both profiles","qrels":["kyc-procedure","pep-screening"],"kind":"hard"}
+{"id":42,"query":"Возвраты на карте идут дробными суммами - настройте пороги контроля на такие паттерны и распишите, как дальше подавать сообщение в надзор","qrels":["transaction-monitoring","sar-submission"],"kind":"hard"}
+{"id":43,"query":"Перевод с английского просел по штампам - прогоните черновик по справочникам редактуры и отдельно зачистите следы нейросети","qrels":["redaktura","humanizer-ru"],"kind":"hard"}
+{"id":44,"query":"The bid closes Friday: plug our eligibility gaps first, then price the offer so it survives the antidumping margin math","qrels":["tender-eligibility-check","proposal-draft-price"],"kind":"hard"}
+{"id":45,"query":"Сделайте техническую часть заявки один в один под ТЗ и заодно прогоните нас и субподрядчиков через реестр недобросовестных","qrels":["proposal-draft-tech","rnp-check"],"kind":"hard"}
+{"id":46,"query":"Смотрим нишу офлайн-диалогов: вытащить готовые решения из доноров и подобрать ИИ-кирпичики так, чтобы работали без сети","qrels":["ai-blocks","app-recon"],"kind":"hard"}
+{"id":47,"query":"Нужен весь визуальный словарь приложения - токены, маскот, иллюстрации - и параллельно голос текстов для экранов модуля помощи","qrels":["app-visual-design","app-copywriting"],"kind":"hard"}
+{"id":48,"query":"Сначала дизайн-план лендинга с одной запоминающейся сценой, затем сборка по нему с медиа, выведенными из брифа","qrels":["direction","build-recipes"],"kind":"hard"}
+{"id":49,"query":"Возьмите наш живой лендинг и дотяните до верхней планки: сначала разрывы против эталона, потом подтверждение скриншотами","qrels":["elevate","verify"],"kind":"hard"}
+{"id":50,"query":"Our WebGL scene looks flat: add filmic exposure grading with grounded contact shadows while keeping the current render path","qrels":["threejs-exposure-color-grading","threejs-scalable-real-time-shadows"],"kind":"hard"}
+{"id":51,"query":"Сколько в год выходит подписка на Adobe Creative Cloud","qrels":[],"kind":"empty"}
+{"id":52,"query":"Как настроить корпоративный ящик в Outlook для стажёра","qrels":[],"kind":"empty"}
+{"id":53,"query":"Какие документы нужны на загранпаспорт и сколько ждать","qrels":[],"kind":"empty"}
+{"id":54,"query":"Куда уехать в феврале, чтобы было тепло и без визы","qrels":[],"kind":"empty"}
+{"id":55,"query":"Как сесть на шпагат за месяц дома","qrels":[],"kind":"empty"}
+{"id":56,"query":"Recommend a sleep tracker under 80 dollars that scores REM well","qrels":[],"kind":"empty"}
+{"id":57,"query":"Write a warm ten-line birthday toast for my sister-in-law","qrels":[],"kind":"empty"}
+{"id":58,"query":"What is the cheapest month to visit Bali without monsoon","qrels":[],"kind":"empty"}
+{"id":59,"query":"Which free VPN should my uncle in Spain use for streaming sports","qrels":[],"kind":"empty"}
+{"id":60,"query":"Перекодируй AVI в MP4 без потери качества","qrels":[],"kind":"empty"}
