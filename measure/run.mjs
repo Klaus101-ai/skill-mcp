@@ -11,7 +11,9 @@
 // index; qrels missing from the index are listed separately, not silently
 // dropped. NDCG gains are binary (qrel present in top-10 = 1).
 //
-// Usage: node measure/run.mjs [--json] [--verbose]
+// Usage: node measure/run.mjs [--set <path>] [--json] [--verbose]
+// --set defaults to measure/heldout.jsonl; the methodology is identical
+// for any set (same metrics, same eligibility rule, same AC3 block).
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,8 +28,18 @@ const K = 5; // recall@k, all@k
 const N = 10; // NDCG@10
 const KINDS = ["easy", "hard", "empty"];
 
+const setArgIdx = process.argv.indexOf("--set");
+const setArg = setArgIdx >= 0 ? process.argv[setArgIdx + 1] : null;
+const SET_PATH = !setArg
+  ? path.join(HERE, "heldout.jsonl")
+  : path.isAbsolute(setArg)
+    ? setArg
+    : fs.existsSync(setArg)
+      ? path.resolve(setArg)
+      : path.join(HERE, setArg);
+
 const queries = fs
-  .readFileSync(path.join(HERE, "heldout.jsonl"), "utf8")
+  .readFileSync(SET_PATH, "utf8")
   .split(/\r?\n/)
   .filter((l) => l.trim())
   .map((l) => JSON.parse(l));
@@ -168,8 +180,12 @@ for (const k of KINDS) kindsOut[k] = { n: byKind[k].n, ...agg(byKind[k]) };
 const ac3Returned = ac3.filter((a) => a.returned);
 const ac3Positive = ac3.filter((a) => a.positiveScore);
 
+const setLabel = SET_PATH.startsWith(HERE + path.sep)
+  ? path.relative(HERE, SET_PATH).split(path.sep).join("/")
+  : SET_PATH;
+
 const result = {
-  set: "heldout.jsonl",
+  set: setLabel,
   skills: skills.length,
   queries: queries.length,
   k: K,

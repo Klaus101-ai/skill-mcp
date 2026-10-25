@@ -386,6 +386,81 @@ the report, script deleted):
 0 fail. `node measure/run.mjs`, `node measure/latency.mjs` (p95 2.14 ms),
 `node measure/weights.mjs` (winner unchanged), draft set 28 → 1.0000.
 
+## M8 § Acceptance set B (independent, delayed)
+
+Set B (`measure/heldout-b.jsonl`, 60 queries: 30 easy / 20 hard / 10 empty)
+was committed **before** any measurement (`M8: acceptance query set B
+(independent)`, commit `6a347a7`) and is the ACCEPTANCE set: it was built by an
+independent agent, never seen while tuning. After the first B run nothing in
+the product was touched — no weights, stop words, stemmer, coverage rule or
+tokenization change. The numbers below are as measured, including where they
+are worse than on set A.
+
+`--set <path>` was added to `run.mjs` (default still `measure/heldout.jsonl`;
+the methodology — metrics, eligibility rule, AC3 block — is identical for any
+set). Command: `node measure/run.mjs --set measure/heldout-b.jsonl`.
+
+### Set B results (product P vs baseline B)
+
+| kind | n | P recall@5 | P all@5 | P NDCG@10 | B recall@5 | B all@5 | B NDCG@10 |
+|---|---|---|---|---|---|---|---|
+| easy | 30 | 0.7667 | 0.7667 | 0.6862 | 0.9000 | 0.9000 | 0.7357 |
+| hard | 20 | 0.7500 | 0.3500 | 0.5500 | 0.7500 | 0.3000 | 0.5524 |
+| empty | 10 | n/a | n/a | n/a | n/a | n/a | n/a |
+| **ALL(qrels)** | 50 | **0.7600** | **0.6000** | **0.6317** | **0.8400** | **0.6600** | **0.6624** |
+
+- **AC2 on B: FAIL** — product recall@5 0.7600 < baseline 0.8400 (38/50 vs
+  42/50). On easy the gap is widest (0.7667 vs 0.9000); hard is a tie
+  (0.7500 vs 0.7500). Set A still shows the opposite (0.7600 vs 0.7000, YES).
+- **AC3 on B: FAIL** — 3 of 10 empty queries returned a positive-scoring
+  result: #53 → `rag-kit:76.855`, #56 → `copy-editing:94.825`, #57 →
+  `landing-page-copy:255.232, direct-response-copy:236.414, …` (set A: 0/10).
+- missing qrels: none; all 50 qrel-bearing queries eligible.
+
+### Set A vs set B (same code, same day)
+
+| metric | set A (validation) | set B (acceptance) |
+|---|---|---|
+| easy recall@5 / all@5 | 0.7714 / 0.7714 | 0.7667 / 0.7667 |
+| hard recall@5 / all@5 | 0.7333 / 0.2667 | 0.7500 / 0.3500 |
+| ALL recall@5 / all@5 | 0.7600 / 0.6200 | 0.7600 / 0.6000 |
+| ALL NDCG@10 | 0.6375 | 0.6317 |
+| product ≥ baseline (AC2) | YES (0.7600 vs 0.7000) | **NO (0.7600 vs 0.8400)** |
+| AC3 non-empty | 0/10 | **3/10 (#53, #56, #57)** |
+| warm search p95 | 2.14 ms (M7) | 2.55 ms (same run day, 2.55/2.34 ms) |
+
+The set-A re-run reproduced M7 exactly (easy 0.7714 / hard 0.7333 / all 0.7600
+/ all@5 0.6200 / NDCG 0.6375 / AC3 0/10), so the A↔B gap comes from the query
+distribution, not from a code change.
+
+### Misses on set B (12 of 50; product top-3)
+
+| # | kind | query | qrels | product top-3 |
+|---|---|---|---|---|
+| 3 | easy | выбрать режим налогобложения для ИП | tax-system-choice | `[]` (empty) |
+| 9 | easy | убрать фильм с пиратского сайта | takedown | `[]` (empty) |
+| 10 | easy | удалить мои данные из фирмы | dsar-response | `[]` (empty) |
+| 12 | easy | review teammate PR before merge | code-review-and-quality | git-workflow-and-versioning, finishing-a-development-branch |
+| 18 | easy | pick easing between app screens | motion-design | redesigner, landing-page, logo-design |
+| 19 | easy | pull competitor palette and fonts | redesigner | refactoring-ui |
+| 23 | easy | У нас чат-бот отвечает клиентам… | user-disclosure-check | dpa-review, google-search, rag-kit |
+| 32 | hard | Before we promote the CV-screening model… | ai-inventory, deployment-review | foreman, edge-case-auditor, n8n-self-hosting |
+| 37 | hard | The offer letter our recruiter drafted… | hiring-review, escalation-flagger | security-and-hardening, cover-letter-writer, logo-design |
+| 41 | hard | Onboarding a politically connected wealthy client… | kyc-procedure, pep-screening | email-and-password-best-practices, two-factor-authentication-best-practices, n8n-self-hosting |
+| 48 | hard | Сначала дизайн-план лендинга… | direction, build-recipes | publisher-regression-guard, inspection-preparation, app-visual-design |
+| 49 | hard | Возьмите наш живой лендинг и дотяните… | elevate, verify | rustore-release, vat-analysis, inspection-defense |
+
+Three easy misses (#3, #9, #10) returned **nothing at all** — the coverage
+rule cut every candidate; five hard misses lose one of two qrels each (their
+`all@5` is what drags 0.3500). Reported as measured; no tuning followed.
+
+### Checks run for M8
+
+`npm test` → 92 tests, 91 pass, 1 skipped (symlink EPERM, unchanged), 0 fail.
+`node measure/run.mjs` (set A) → matches M7. `node measure/run.mjs --set
+measure/heldout-b.jsonl` (human + `--json`). `node measure/latency.mjs` →
+warm p95 2.55 ms (search) / 2.34 ms (hint path), first call 370.14 ms.
+
 ## Latency (`latency.mjs`)
 
 Same path as the plugin (`plugin/hint.mjs` `createContextHook`): one factory
@@ -402,6 +477,7 @@ npm install
 npm test                  # must stay green (incl. text/ac3 M5 tests)
 node measure/run.mjs      # human table (product vs baseline, by kind + AC3)
 node measure/run.mjs --json  # same numbers, machine-readable, incl. per-query tops
+node measure/run.mjs --set measure/heldout-b.jsonl  # same metrics on set B (M8)
 node measure/weights.mjs  # field-weight candidates on set A (M5)
 node measure/latency.mjs  # p50/p95/max + first-call (index build)
 node measure/baseline.mjs --k 5 --verbose   # standalone baseline on the draft set
