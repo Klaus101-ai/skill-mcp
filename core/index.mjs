@@ -1,18 +1,48 @@
 // Index and ranking over discovered skills, backed by MiniSearch (BM25+).
-// Field weights: name x3, description x2, headings x1 (spec, M1).
+// Field weights: name x3, description x2, headings x1 (spec, M1; re-chosen
+// in M5 against measure/README.md, the value below is the selected winner).
+// Normalization + stemming + the significant-match gate (AC3) live in
+// core/text.mjs and are applied identically to documents and queries.
 // No network calls, no writes: R5.
 import MiniSearch from "minisearch";
+import { STOP_WORDS, processTerm, significantQueryTokens, tokenize } from "./text.mjs";
 
 const WHY_LIMIT = 160;
 const WHY_TERMS_LIMIT = 6;
 const FIELD_BOOST = { name: 3, description: 2, headings: 1 };
 
-// Stop words (short ru+en list) and single-character tokens are dropped from
-// `why`, so only significant terms are shown, at most 6 of them.
-const STOP_WORDS = new Set([
-  "a", "an", "the", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are",
-  "и", "в", "во", "на", "по", "с", "со", "к", "о", "об", "от", "до", "за", "из", "не",
-]);
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+// --- relative noise floor (M5, item 4) -------------------------------------
+// A result list survives only when its BEST score reaches MIN_STRENGTH of the
+// corpus ceiling for this query. The ceiling is, per meaningful query token,
+// the best score that token achieves anywhere in the corpus (a one-term
+// search, quality multiplier = 1), plus a theoretical BM25 upper bound for a
+// token that occurs in NO skill: idf at df = 0, saturation (d + k + 1) and the
+// largest field boost of the current weight set. The theoretical part keeps a
+// query whose rare tokens are absent from the corpus from getting a tiny
+// denominator for free.
+//
+// MIN_STRENGTH = 0.7 sits inside the measured gap of the A set
+// (measure/README.md § Threshold): the biggest empty-query leftover scores
+// 0.664 of its ceiling, the weakest of all 50 qrel queries scores 0.720 —
+// so 0.7 cuts the leftovers and provably touches no easy/hard query on A.
+const MIN_STRENGTH = 0.7;
+const BM25_SATURATION = 0.5 + 1.2 + 1; // d + (k + 1) with k=1.2, b irrelevant at tf -> inf
+
+function corpusCeiling(index, sig, boost) {
+  // public getter in minisearch 7.x (`get documentCount()`)
+  const docs = Number.isFinite(index.documentCount) ? index.documentCount : 0;
+  const idfAtZeroDf = Math.log(1 + (docs + 0.5) / 0.5);
+  const maxBoost = Math.max(1, ...Object.values(boost));
+  const absentTokenBound = idfAtZeroDf * BM25_SATURATION * maxBoost;
+  let sum = 0;
+  for (const t of sig) {
+    const best = index.search(t, { boost }); // one-term query: pure contribution
+    sum += best.length > 0 ? best[0].score : absentTokenBound;
+  }
+  return sum;
+}
 
 function significantTerms(terms) {
   const out = [];
@@ -27,9 +57,14 @@ function significantTerms(terms) {
 
 /** Build a search index from [{name, path, description, bodyHeadings}]. */
 export function buildIndex(skills) {
+  // tokenize/processTerm come from core/text.mjs and are used by MiniSearch
+  // both when indexing these documents and when processing a query string,
+  // so documents and queries share one normalization/stemming pipeline.
   const index = new MiniSearch({
     fields: ["name", "description", "headings"],
     storeFields: ["name", "path", "description", "headings"],
+    tokenize,
+    processTerm,
     bm25: { k: 1.2, b: 0.7 },
   });
   const docs = skills.map((s, i) => ({
@@ -151,21 +186,52 @@ export function selectWinner(candidates) {
  * descending (ties broken deterministically by name, then path), with
  * duplicate skill names collapsed to their best-scoring entry.
  * Empty / whitespace-only / punctuation-only queries return [].
+ *
+ * AC3 significant-match gate (M5): the query first yields its meaningful
+ * tokens (>= 3 chars, not stop words, normalized + stemmed — core/text.mjs).
+ * If there are none, or if no result document actually contains at least one
+ * of them in name/description/headings, the answer is []. MiniSearch's
+ * `r.match` lists the document terms that matched this query, already
+ * normalized/stemmed by the very same pipeline, so the containment check is
+ * exact and needs no second index. This one gate is the whole AC3 story for
+ * every consumer: the MCP `find` (note "ничего не найдено") and the plugin
+ * hint (no block) both simply call `search()` and show nothing on [].
+ *
+ * `boost` optionally overrides the field weights (used by measure/weights.mjs
+ * to compare weight candidates on the A set without editing this file).
  */
-export function search(index, query, { limit = 5, restrict_to: restrictTo } = {}) {
+export function search(index, query, { limit = 5, restrict_to: restrictTo, boost } = {}) {
   if (typeof query !== "string") return [];
   const q = query.trim();
   if (!q) return [];
   if (!/[\p{L}\p{N}]/u.test(q)) return []; // punctuation-only garbage (AC3)
 
-  const options = { boost: { ...FIELD_BOOST } };
+  const sig = significantQueryTokens(q);
+  if (sig.length === 0) return []; // nothing meaningful could prove a match (AC3)
+
+  const options = { boost: boost ? { ...boost } : { ...FIELD_BOOST } };
   if (Array.isArray(restrictTo) && restrictTo.length > 0) {
     options.filter = makeFilter(restrictTo);
   }
 
-  const results = index.search(q, options);
-  results.sort(compareResults);
-  const unique = dedupeByName(results);
+  const matched = index.search(q, options);
+  // AC3 gate: keep a result only if at least one meaningful query token
+  // (stemmed) really occurs in this skill's indexed text.
+  const gated = matched.filter((r) => {
+    const m = r.match;
+    if (!m) return false;
+    return sig.some((t) => hasOwn(m, t));
+  });
+  gated.sort(compareResults);
+  const unique = dedupeByName(gated);
+
+  // Relative noise floor (M5 item 4): a weak best score against the corpus
+  // ceiling means the "match" is noise — answer as if nothing was found.
+  if (unique.length > 0) {
+    const ceiling = corpusCeiling(index, sig, options.boost);
+    if (ceiling > 0 && unique[0].score < MIN_STRENGTH * ceiling) return [];
+  }
+
   const capped = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), unique.length) : unique.length;
 
   return unique.slice(0, capped).map((r) => ({
