@@ -1,0 +1,60 @@
+{"id":1,"query":"Посмотри наш договор поставки до подписания, особенно сроки и неустойка","qrels":["supply-contract-review"],"kind":"easy"}
+{"id":2,"query":"Проверь договор аренды под наш новый офис: там депозит и продление","qrels":["lease-commercial"],"kind":"easy"}
+{"id":3,"query":"Пришло требование от следствия о предоставлении документов — как реагировать?","qrels":["subpoena-triage"],"kind":"easy"}
+{"id":4,"query":"Составь претензию подрядчику — работу принимает с длительной просрочкой","qrels":["pretensia-draft"],"kind":"easy"}
+{"id":5,"query":"Подготовь внутренний антиотмывочный регламент по 115-ФЗ для наших операций","qrels":["policy-115fz"],"kind":"easy"}
+{"id":6,"query":"Разбери соглашение о конфиденциальности от партнёра до завтрашней встречи","qrels":["nda-review"],"kind":"easy"}
+{"id":7,"query":"Из ГИТ пришло предписание — нужна помощь с ответом","qrels":["trudovaya-inspeksiya-response"],"kind":"easy"}
+{"id":8,"query":"Из налоговой прислали акт по результатам проверки — как на него ответить","qrels":["tax-audit-response"],"kind":"easy"}
+{"id":9,"query":"Как загрузить Android-приложение в магазин: карточка, модерация, релиз","qrels":["rustore-release"],"kind":"easy"}
+{"id":10,"query":"Добавить внутренние покупки в приложении — как это устроено в магазине","qrels":["rustore-billing"],"kind":"easy"}
+{"id":11,"query":"Разобрать APK донора: как получить пакет и понять лицензии компонентов","qrels":["app-recon"],"kind":"easy"}
+{"id":12,"query":"Подними каркас Android-приложения на Compose с git и проверками качества","qrels":["android-skeleton"],"kind":"easy"}
+{"id":13,"query":"Заказали корпоративный сайт — нужен проект на Next.js с git и README","qrels":["siteskeleton"],"kind":"easy"}
+{"id":14,"query":"Найди, почему сайт грузится дольше, чем надо","qrels":["performance-optimization"],"kind":"easy"}
+{"id":15,"query":"Собери презентацию для инвесторов в фирменном стиле","qrels":["slides"],"kind":"easy"}
+{"id":16,"query":"Сделай мне сайт с нуля — сначала вопросы, потом строительство","qrels":["foreman"],"kind":"easy"}
+{"id":17,"query":"Проверь, не числится ли наша компания в списке недобросовестных поставщиков","qrels":["rnp-check"],"kind":"easy"}
+{"id":18,"query":"На Windows субагент завис после запуска dev-сервера — как снять процесс безопасно","qrels":["windows-powershell-ops"],"kind":"easy"}
+{"id":19,"query":"We're about to launch a consumer marketplace app — review the legal requirements before going live","qrels":["launch-review"],"kind":"easy"}
+{"id":20,"query":"Our fintech needs a client due diligence framework for onboarding","qrels":["kyc-procedure"],"kind":"easy"}
+{"id":21,"query":"Add a mandatory TOTP second step to our login flow","qrels":["two-factor-authentication-best-practices"],"kind":"easy"}
+{"id":22,"query":"Draft three ad variants for Instagram for my bakery","qrels":["ad-copy"],"kind":"easy"}
+{"id":23,"query":"This text sounds AI-written, make it sound like a human wrote it","qrels":["humanizer"],"kind":"easy"}
+{"id":24,"query":"Review the master services agreement our vendor just sent over","qrels":["vendor-agreement-review"],"kind":"easy"}
+{"id":25,"query":"Set up row-level security policies and auth hooks in our hosted Postgres","qrels":["supabase"],"kind":"easy"}
+{"id":26,"query":"Our n8n automation needs to split large payloads into batches with branching","qrels":["n8n-workflow-patterns"],"kind":"easy"}
+{"id":27,"query":"Wire up continuous integration for our Node service","qrels":["ci-cd-and-automation"],"kind":"easy"}
+{"id":28,"query":"From my last git history pull out real achievements for interview stories","qrels":["star-story-extractor"],"kind":"easy"}
+{"id":29,"query":"Turn yesterday's board meeting into official minutes","qrels":["board-minutes"],"kind":"easy"}
+{"id":30,"query":"Set up self-hosted n8n with HTTPS on our new VPS","qrels":["n8n-self-hosting"],"kind":"easy"}
+{"id":31,"query":"Check our counterparties against US, EU, UK sanction lists","qrels":["sanctions-screening"],"kind":"easy"}
+{"id":32,"query":"We spotted a suspicious wire transfer — need the regulator report filed today","qrels":["sar-submission"],"kind":"easy"}
+{"id":33,"query":"Design a logo for my coffee shop","qrels":["logo-design"],"kind":"easy"}
+{"id":34,"query":"Go through my repo history and pull out things I actually shipped for the CV","qrels":["evidence-miner"],"kind":"easy"}
+{"id":35,"query":"Review this consultancy services contract before I sign","qrels":["services-contract-review"],"kind":"easy"}
+{"id":36,"query":"Разбери только что полученные облачные условия от вендора: в основном соглашении непонятные SLA и выход, а в приложении — передача данных субобработчикам","qrels":["saas-msa-review","dpa-review"],"kind":"hard"}
+{"id":37,"query":"Разбери документацию к конкурсу: в ТЗ явно зашиты требования под одного поставщика","qrels":["tender-documentation-review","biased-tender-detection"],"kind":"hard"}
+{"id":38,"query":"Мы продаём долю в ООО — проверь черновики документов, включая соглашение о неразглашении","qrels":["share-deal-review","nda-review"],"kind":"hard"}
+{"id":39,"query":"Сделать приложение для детей: спроектируй контент с уровнями и микротексты экранов","qrels":["app-content-design","app-copywriting"],"kind":"hard"}
+{"id":40,"query":"Сделай премиальный сайт студии с плавными анимациями GSAP","qrels":["build-awwwards-quality-sites","gsap"],"kind":"hard"}
+{"id":41,"query":"Before we ship, dig for security holes and then harden the system","qrels":["security-audit","security-and-hardening"],"kind":"hard"}
+{"id":42,"query":"Новая фича собирает поведение пользователей — оцените риски для ПДн и нужна ли формальная оценка","qrels":["pia-generation","use-case-triage-data-protection"],"kind":"hard"}
+{"id":43,"query":"Improve the metric on our signup flow — maybe rework the whole landing?","qrels":["page-cro","landing-page"],"kind":"hard"}
+{"id":44,"query":"The UI is messy and the code behind it is tangled — clean up both","qrels":["refactoring-ui","refactoring"],"kind":"hard"}
+{"id":45,"query":"Capture the mobile app donor's UX: screen map and flows","qrels":["app-ux-capture","redesigner"],"kind":"hard"}
+{"id":46,"query":"Нужен продающий текст услуги в собственном голосе, не шаблонный","qrels":["promo","copywriting"],"kind":"hard"}
+{"id":47,"query":"Подготовь внутренний AI-документ: оценка влияния и рамки допустимого использования","qrels":["aia-generation","use-case-triage-ai-governance"],"kind":"hard"}
+{"id":48,"query":"Extract all dates, amounts and owners from the batch of incoming contracts into a table","qrels":["tabular-review","diligence-issue-extraction"],"kind":"hard"}
+{"id":49,"query":"Review the data processing addendum our vendor attached","qrels":["dpa-review","vendor-agreement-review"],"kind":"hard"}
+{"id":50,"query":"Пишем отзыв на акт камеральной проверки и параллельно думаем — идти ли в суд, если не согласимся с решением","qrels":["arbitration-tax-disputes","pre-trial-appeal"],"kind":"hard"}
+{"id":51,"query":"Как сварить борщ с говядиной","qrels":[],"kind":"empty"}
+{"id":52,"query":"Курс доллара завтра","qrels":[],"kind":"empty"}
+{"id":53,"query":"Рецепт шарлотки с яблоками","qrels":[],"kind":"empty"}
+{"id":54,"query":"Что посмотреть вечером с семьёй","qrels":[],"kind":"empty"}
+{"id":55,"query":"Погода в Сочи на выходные","qrels":[],"kind":"empty"}
+{"id":56,"query":"Сколько стоит новый iPhone","qrels":[],"kind":"empty"}
+{"id":57,"query":"Как быстро вырастить лимон из косточки","qrels":[],"kind":"empty"}
+{"id":58,"query":"When is the next bus to the airport","qrels":[],"kind":"empty"}
+{"id":59,"query":"What coffee should I buy for the office","qrels":[],"kind":"empty"}
+{"id":60,"query":"Сколько минут варить перепелиное яйцо","qrels":[],"kind":"empty"}
