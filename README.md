@@ -5,9 +5,12 @@ Local skill search and ranking for [opencode](https://opencode.ai). Indexes
 queries with a ranked list of matching skills. Everything runs locally:
 **no network, no LLM, no embeddings, no API keys, files are read-only.**
 
-Status: **M1 + M2 + M3** — core index, CLI smoke run, baseline evaluation, the
-**MCP server** (`server/`, stdio: `find` / `outline` / `read-section`) and the
-**context hint plugin** (`plugin/`, `<skill_hint>` block before model dispatch).
+Status: **M1 + M2 + M3 + M4 + M5** — core index, CLI smoke run, baseline
+evaluation, the **MCP server** (`server/`, stdio: `find` / `outline` /
+`read-section`), the **context hint plugin** (`plugin/`, `<skill_hint>` block
+before model dispatch), the held-out evaluation (**set A = validation**) and the
+**M5 pipeline**: normalization + light stemming, the AC3 significant-match gate
+and the relative noise floor.
 
 ## Requirements
 
@@ -44,14 +47,29 @@ const hits = search(index, "bug bounty report", { limit: 5 });
 // -> [{ name, path, score, why }, ...]
 ```
 
-- Field weights: `name` x3, `description` x2, `headings` x1.
+- Field weights: `name` x3, `description` x2, `headings` x1 (re-confirmed as
+  the best of three candidates on set A in M5, `measure/weights.mjs`).
+- Normalization + light stemming (`core/text.mjs`): lower-case, `ё`→`е`,
+  punctuation stripped, frequent RU/EN endings cut with a 3-character root
+  floor — one pipeline injected as MiniSearch `tokenize` + `processTerm`, so
+  documents and queries are treated identically.
+- **AC3 significant-match gate**: a result is valid only if at least one
+  meaningful query token (≥3 chars, not in the frozen ru+en stop list) really
+  occurs in the skill's `name`+`description`+`headings`; otherwise `search()`
+  returns `[]` — the MCP `find` answers `note: "ничего не найдено"` and the
+  plugin simply shows no block. A relative noise floor then rejects weak
+  leftovers whose best score is under 70% of the corpus ceiling for that query
+  (derivation and the measured gap: [`measure/README.md`](measure/README.md)
+  § M5 § Threshold).
 - Duplicate skill names (the same skill installed in several roots) collapse
   to the best-scoring entry; backup directories (`_backup`, `_backups`,
   `.backup`, `backup`) are never indexed.
 - `why` is a single line, max 160 chars: matched fields plus up to 6
-  significant terms (stop words and 1-character tokens are dropped).
+  significant terms (stop words and 1-character tokens are dropped; terms are
+  shown in their stemmed form).
 - `restrict_to: ["name-or-glob*"]` filters results to an allowlist of skill names.
-- Empty / whitespace / punctuation-only queries return `[]` — no random hints.
+- Empty / whitespace / punctuation-only queries — and queries with no
+  meaningful token that any skill text matches — return `[]`: no random hints.
 - `skipped` lists `SKILL.md` symlinks whose real path escapes their root
   (`reason: "outside-root"`); `selectWinner` applies the shared
   "highest score, then lexicographically first path" rule.
@@ -231,9 +249,16 @@ formation time, without opencode running.
 
 ## Evaluation
 
-See [`measure/README.md`](measure/README.md). The held-out set
-(`measure/heldout.jsonl`) is independent, was written by a different agent and
-is committed **before** any measurement run; it is never used for tuning.
+See [`measure/README.md`](measure/README.md). Two roles, fixed in M5:
+
+- **set A** (`measure/heldout.jsonl`, commit `bbf9c74`) — independent, written
+  by a different agent before any run; its M4 numbers are frozen, so from M5 it
+  is the **validation set**: changes are verified here with a before/after
+  table. Queries, qrels and stop words never change; weights and the threshold
+  are chosen only through a measured comparison whose numbers are recorded in
+  `measure/README.md`.
+- **set B** — the honest **acceptance** set: a fresh held-out set to be built
+  later by an independent agent that has not seen these numbers.
 
 ## License
 
