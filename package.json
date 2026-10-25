@@ -10,7 +10,9 @@
   "scripts": {
     "test": "node --test",
     "smoke": "node cli/smoke.mjs",
-    "measure": "node measure/baseline.mjs --k 5",
+    "measure": "node measure/run.mjs",
+    "latency": "node measure/latency.mjs",
+    "measure:baseline": "node measure/baseline.mjs --k 5",
     "server": "node server/index.mjs"
   },
   "dependencies": {

@@ -7,17 +7,8 @@ import { fileURLToPath } from "node:url";
 import { defaultRoots, discoverSkills } from "../core/sources.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const K = (() => {
-  const i = process.argv.indexOf("--k");
-  if (i >= 0 && process.argv[i + 1]) {
-    const v = Number.parseInt(process.argv[i + 1], 10);
-    if (Number.isFinite(v) && v > 0) return v;
-  }
-  return 5;
-})();
-const VERBOSE = process.argv.includes("--verbose");
 
-function tokenize(text) {
+export function tokenize(text) {
   return String(text)
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
@@ -25,7 +16,7 @@ function tokenize(text) {
 }
 
 /** Classic BM25 (k=1.2, b=0.7) over document text. */
-class Bm25 {
+export class Bm25 {
   constructor(docs, k = 1.2, b = 0.7) {
     this.k = k;
     this.b = b;
@@ -67,40 +58,55 @@ class Bm25 {
   }
 }
 
-const { skills } = discoverSkills(defaultRoots());
-const bm25 = new Bm25(
-  skills.map((s) => ({
+/** The exact document text the baseline ranks over (shared with run.mjs). */
+export function baselineDocs(skills) {
+  return skills.map((s) => ({
     name: s.name,
     text: `${s.name} ${s.name} ${s.description} ${s.bodyHeadings.join(" ")}`,
-  })),
-);
-
-const queriesPath = path.join(HERE, "queries.jsonl");
-const queries = fs
-  .readFileSync(queriesPath, "utf8")
-  .split(/\r?\n/)
-  .filter((l) => l.trim())
-  .map((l) => JSON.parse(l));
-
-const present = new Set(skills.map((s) => s.name));
-let hits = 0;
-let eligible = 0;
-
-for (const q of queries) {
-  const relevant = (q.relevant || []).filter((r) => present.has(r));
-  if (relevant.length === 0) {
-    if (VERBOSE) console.log(`skip  #${q.id} "${q.query}" — no qrel skill in index`);
-    continue;
-  }
-  eligible += 1;
-  const top = bm25.search(q.query, K);
-  const hit = top.some((r) => relevant.includes(r.name));
-  if (hit) hits += 1;
-  if (VERBOSE) {
-    console.log(`${hit ? "hit " : "MISS"} #${q.id} "${q.query}" -> ${top.map((t) => t.name).join(", ")}`);
-  }
+  }));
 }
 
-const recall = eligible > 0 ? hits / eligible : 0;
-console.log(`baseline: BM25(k=1.2,b=0.7), skills=${skills.length}, queries=${queries.length}`);
-console.log(`recall@${K} = ${recall.toFixed(4)} (${hits}/${eligible} eligible; ${queries.length - eligible} skipped: qrel not in index)`);
+/** CLI entry: recall@k on queries.jsonl. Kept import-safe for measure/run.mjs. */
+export function main(argv = process.argv.slice(2)) {
+  const { skills } = discoverSkills(defaultRoots());
+  const bm25 = new Bm25(baselineDocs(skills));
+  const k = argv.includes("--k") ? argv[argv.indexOf("--k") + 1] : null;
+  const K = Number.isFinite(Number.parseInt(k, 10)) && Number.parseInt(k, 10) > 0 ? Number.parseInt(k, 10) : 5;
+  const verbose = argv.includes("--verbose");
+
+  const queriesPath = path.join(HERE, "queries.jsonl");
+  const queries = fs
+    .readFileSync(queriesPath, "utf8")
+    .split(/\r?\n/)
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+
+  const present = new Set(skills.map((s) => s.name));
+  let hits = 0;
+  let eligible = 0;
+
+  for (const q of queries) {
+    const relevant = (q.relevant || []).filter((r) => present.has(r));
+    if (relevant.length === 0) {
+      if (verbose) console.log(`skip  #${q.id} "${q.query}" — no qrel skill in index`);
+      continue;
+    }
+    eligible += 1;
+    const top = bm25.search(q.query, K);
+    const hit = top.some((r) => relevant.includes(r.name));
+    if (hit) hits += 1;
+    if (verbose) {
+      console.log(`${hit ? "hit " : "MISS"} #${q.id} "${q.query}" -> ${top.map((t) => t.name).join(", ")}`);
+    }
+  }
+
+  const recall = eligible > 0 ? hits / eligible : 0;
+  console.log(`baseline: BM25(k=1.2,b=0.7), skills=${skills.length}, queries=${queries.length}`);
+  console.log(`recall@${K} = ${recall.toFixed(4)} (${hits}/${eligible} eligible; ${queries.length - eligible} skipped: qrel not in index)`);
+  return { recall, hits, eligible };
+}
+
+const invokedDirectly =
+  typeof process.argv[1] === "string" &&
+  path.resolve(process.argv[1]).toLowerCase() === path.resolve(fileURLToPath(import.meta.url)).toLowerCase();
+if (invokedDirectly) main();

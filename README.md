@@ -25,7 +25,9 @@ npm install
 ```sh
 npm test        # unit tests (node:test), including the spawned MCP server
 npm run smoke   # build the index over the real skill roots, run 5 fixed queries
-npm run measure # baseline BM25 recall@5 on the draft query set
+npm run measure # held-out metrics: product vs baseline recall@5 / NDCG@10 (measure/heldout.jsonl)
+npm run latency # hint-formation latency p50/p95/max along the plugin path
+npm run measure:baseline # standalone baseline BM25 recall@5 on the draft set
 npm run server  # start the MCP server on stdio
 node cli/plugin-demo.mjs   # print the exact <skill_hint> block the plugin adds (+ timing)
 ```
@@ -229,9 +231,9 @@ formation time, without opencode running.
 
 ## Evaluation
 
-See [`measure/README.md`](measure/README.md). The query set is a **draft**; the
-final held-out set is produced separately (stage M4) and is never used for
-tuning.
+See [`measure/README.md`](measure/README.md). The held-out set
+(`measure/heldout.jsonl`) is independent, was written by a different agent and
+is committed **before** any measurement run; it is never used for tuning.
 
 ## License
 
