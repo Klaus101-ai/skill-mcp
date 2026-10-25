@@ -5,9 +5,9 @@ Local skill search and ranking for [opencode](https://opencode.ai). Indexes
 queries with a ranked list of matching skills. Everything runs locally:
 **no network, no LLM, no embeddings, no API keys, files are read-only.**
 
-Status: **M1 + M2** — core index, CLI smoke run, baseline evaluation and the
-**MCP server** (`server/`, stdio: `find` / `outline` / `read-section`). The
-plugin is not implemented yet.
+Status: **M1 + M2 + M3** — core index, CLI smoke run, baseline evaluation, the
+**MCP server** (`server/`, stdio: `find` / `outline` / `read-section`) and the
+**context hint plugin** (`plugin/`, `<skill_hint>` block before model dispatch).
 
 ## Requirements
 
@@ -27,6 +27,7 @@ npm test        # unit tests (node:test), including the spawned MCP server
 npm run smoke   # build the index over the real skill roots, run 5 fixed queries
 npm run measure # baseline BM25 recall@5 on the draft query set
 npm run server  # start the MCP server on stdio
+node cli/plugin-demo.mjs   # print the exact <skill_hint> block the plugin adds (+ timing)
 ```
 
 Programmatic API (`core/`):
@@ -118,6 +119,103 @@ Restart opencode afterwards — config is loaded once at startup.
   `E_UNAVAILABLE`; the server keeps running and opencode still starts.
 - The index is built lazily on the first tool call and cached for the
   lifetime of the process (no background reindexing).
+
+## Plugin (context hint)
+
+`plugin/skill-router-hint.ts` is an opencode **context-hook plugin**: right
+before each model dispatch (`context` hook — the agent loop, including
+tool-driven continuations) it appends **one text part** to the request's
+`system` array with at most **2** skill suggestions:
+
+```text
+<skill_hint source="skill-router" note="подсказка, не загрузка: скилл не открыт">
+- supply-contract-review: <first line of its description>; открыть: инструмент skill, name=supply-contract-review
+</skill_hint>
+```
+
+Messages, history, tools and options are never modified — only that one
+`system` part is appended (and at most once per request).
+
+What it does **not** do, by contract:
+
+- it **never loads skills**: no `skill` call, no other tool calls, no file
+  writes, no events — so it cannot trigger or fake a `skill-gate` event;
+- it does not replace the lead's mandatory «Скиллы» field, it is a hint text;
+- no network, no LLM, no embeddings, no keys: BM25 search over the local index.
+
+Budget and safety (fail-open): ≤2 entries, ≤1000 chars, ≤150 ms formation —
+a hint that would exceed the time budget is dropped (reported with
+`SKILL_ROUTER_DEBUG=1`), and any internal error is swallowed: the model request
+continues without a hint instead of failing. The index is built **once per
+opencode process** on the first hook call; that first call pays the build
+(~330 ms on a 367-skill install) and is normally dropped by the 150 ms guard —
+the next dispatch hints normally.
+
+### Files
+
+| File | Role |
+|---|---|
+| `plugin/skill-router-hint.ts` | loadable entry: `export default { id, setup }`, registers the `context` hook |
+| `plugin/hint.mjs` | hook logic (plain ESM — shared with tests and the demo, no build step) |
+| `plugin/hint.d.mts` | local type declarations (the repo does **not** depend on `@opencode/plugin`) |
+| `plugin/skill-router.config.json` | deny/allow config, resolved **next to the plugin module** (`plugin/`) |
+
+Keep the repository layout: the entry imports `./hint.mjs`, which imports
+`../core/*` — a single copied `.ts` file will not work on its own.
+
+### Connect it in opencode
+
+Add one entry to the `plugins` array of your config and restart opencode
+(config is loaded once at startup):
+
+```jsonc
+// ~/.config/opencode/opencode.json(c)  or  <project>/opencode.json(c)
+"plugins": [
+  "/absolute/path/to/skill-router/plugin/skill-router-hint.ts"
+]
+```
+
+Alternatively rely on plugin auto-discovery: opencode loads `*.ts`/`*.js` from
+`.opencode/plugins/` (project; documented) and from `~/.config/opencode/plugins/`
+(global directory; observed on a live install where `"plugins": []` still loads
+`skill-gate.ts`). In the auto-discovery route place the whole `plugin/` +
+`core/` pair, not just the entry file.
+
+This repository never registers the plugin by itself — connecting it is one
+explicit config line, an owner's action.
+
+### Environment variables
+
+| Variable | Values | Effect |
+|---|---|---|
+| `SKILL_ROUTER_HINT` | `off`, `0`, `false` (case-insensitive) | disable the hint entirely; default: enabled |
+| `SKILL_ROUTER_DEBUG` | `1` | one-line diagnostics to **stderr**: index build, dropped hint with its timing, fail-open reasons |
+
+### skill-router.config.json
+
+```jsonc
+{
+  "deny":  { "tenderwriter": ["contract-review*"] }, // never hinted for this agent
+  "allow": { "some-agent": ["skill-a", "skill-b*"] } // ONLY these are hinted for this agent
+}
+```
+
+- default: every skill is hintable except the agent's `deny` entries;
+- when an `allow` list exists for an agent, only it is hinted (still minus
+  `deny`);
+- keys are agent ids from the context event (`event.agent`), values are skill
+  names with optional `*` patterns;
+- a missing or malformed config falls back to the defaults (fail-open), it is
+  never an error.
+
+### Demo
+
+```sh
+node cli/plugin-demo.mjs ["query..."]   # default query: «проверь договор поставки»
+```
+
+Prints exactly the text part the plugin would append to `system` and the
+formation time, without opencode running.
 
 ## Skill roots (read-only)
 
