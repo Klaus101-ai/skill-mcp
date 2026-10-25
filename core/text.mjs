@@ -9,17 +9,54 @@
 // `this._options.tokenize(query).flatMap(processTerm)`), so one definition
 // covers both call sites with no second code path to drift.
 //
-// Pipeline: split -> lowercase -> ё->е -> strip punctuation -> cut endings.
-// No dependencies, no network: R5.
+// Pipeline: split into WORDS -> lowercase -> ё->е -> strip punctuation ->
+// cut endings. No dependencies, no network: R5.
+//
+// WORD RULE (M6, token-level match): a word is a run of letters/digits that
+// may contain a dot, but never a hyphen. So `next.js` is ONE word (it does
+// not hand out a free `next` token to every query containing "next"), while
+// `gsap-scrolltrigger` and `AI-документ` are TWO words (a hyphen joins
+// independent words — and is the only place where a Latin and a Cyrillic
+// word meet in one token). Trailing punctuation is stripped later by
+// normalizeTerm, so "договор." and "договор" still fold to one term.
 //
 // Significance (the AC3 gate) is a QUERY-side notion: a token counts as
-// meaningful only if its normalized form is >= 3 chars and is not a stop
-// word; punctuation-only tokens cannot exist after tokenization. The gate
-// keeps a result only when at least one such token of the query (after
-// normalization/stemming) really occurs in the skill text.
+// meaningful when its normalized form is >= 3 chars and is not a stop word,
+// OR when the token as WRITTEN is a whitelisted uppercase acronym (M6: AI,
+// ML, UI …). The gate keeps a result only when at least one such token of
+// the query (after normalization/stemming) is EQUAL to a token of the skill
+// text — never a substring of a longer word.
 
 /** Minimum length of a *meaningful* query token (spec M5, AC3 gate). */
 export const MIN_TOKEN_LENGTH = 3;
+
+/**
+ * Whitelist of short tokens that stay meaningful despite being < 3 chars
+ * (M6, AC3): common IT acronyms — `ai`, `ml`, `ui`, `ux`, `qa`, `pr`, `hr`,
+ * `it`, `ci`, `cd`, `db`, `api`, `sdk`, `gpu`. They are only recognized when
+ * the token is WRITTEN in upper case in the query (`AI`, not `ai`): case is
+ * the one signal that separates an acronym from an ordinary word — the
+ * English pronoun `it` and the lowercase bigrams `in`-class noise must not
+ * start proving matches. The 3-char members (`api`, `sdk`, `gpu`) are listed
+ * for completeness; they already pass the length rule. Rationale and effect:
+ * `measure/README.md` § M6 § Acronyms. RU stop words (`и`, `в`, `с`, `на`)
+ * are unaffected — they stay stop words.
+ */
+export const SHORT_ACRONYMS = new Set([
+  "ai", "ml", "ui", "ux", "qa", "pr", "hr", "it", "ci", "cd", "db", "api", "sdk", "gpu",
+]);
+
+/**
+ * Is `raw` (the token exactly as written in the query) a whitelisted
+ * acronym? Letters only (dots/hyphens stripped, so `AI.` counts), 2-3
+ * letters, upper case in the source, member of SHORT_ACRONYMS.
+ */
+export function isShortAcronym(raw) {
+  const letters = String(raw ?? "").replace(/[^\p{L}]+/gu, "");
+  if (letters.length < 2 || letters.length > 3) return false;
+  if (letters !== letters.toUpperCase()) return false; // lower/mixed case = ordinary word
+  return SHORT_ACRONYMS.has(letters.toLowerCase());
+}
 /** Minimum length of a stem; cuts that would leave a shorter root are refused. */
 export const MIN_STEM_LENGTH = 3;
 /** Safety valve: suffix cuts are chained until stable, but never endlessly. */
@@ -44,15 +81,18 @@ const RU_SUFFIXES = [
 const EN_SUFFIXES = ["ing", "es", "ed", "s"]; // longest first: ing(3) > es/ed(2) > s(1)
 
 /**
- * Split text into raw tokens: runs of letters and digits are tokens,
- * everything else (spaces, punctuation, symbols) is a separator. Same rule
- * as the baseline tokenizer (measure/baseline.mjs tokenize), so product and
- * baseline see the same units.
+ * Split text into WORDS (M6: token-level match): runs of letters and digits
+ * are words, a dot stays INSIDE a word (`next.js` is one word — its parts
+ * are not free-standing occurrences of `next`/`js`), everything else
+ * (spaces, punctuation, symbols, hyphens) separates words. Tokens with no
+ * letter/digit at all (`...`) are dropped. Hyphens stay separators: they
+ * join independent words (`gsap-scrolltrigger`, `next-steps`) and are the
+ * boundary in mixed-script compounds (`AI-документ`).
  */
 export function tokenize(text) {
   return String(text ?? "")
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((t) => t !== "");
+    .split(/[^\p{L}\p{N}.]+/u)
+    .filter((t) => t !== "" && /[\p{L}\p{N}]/u.test(t));
 }
 
 /** lowercase, ё -> е, drop any punctuation/symbol residue ("" for junk). */
@@ -116,19 +156,22 @@ export function processTerm(term) {
 /**
  * Meaningful tokens of a query for the AC3 gate, normalized + stemmed,
  * deduplicated, order preserved. A token is meaningful when its normalized
- * form is >= MIN_TOKEN_LENGTH chars and is not a stop word; punctuation-only
- * tokens never survive `tokenize`. Returns [] when nothing meaningful is
- * left — such a query cannot be proven by any skill text and must yield [].
+ * form is >= MIN_TOKEN_LENGTH chars and is not a stop word — or when the
+ * token as written is a whitelisted upper-case acronym (M6: `AI`, `ML` …,
+ * see SHORT_ACRONYMS); punctuation-only tokens never survive `tokenize`.
+ * Returns [] when nothing meaningful is left — such a query cannot be
+ * proven by any skill text and must yield [].
  */
 export function significantQueryTokens(text) {
   const seen = new Set();
   const out = [];
   for (const raw of tokenize(text)) {
+    const acronym = isShortAcronym(raw);
     const norm = normalizeTerm(raw);
-    if (norm.length < MIN_TOKEN_LENGTH) continue;
+    if (!acronym && norm.length < MIN_TOKEN_LENGTH) continue;
     if (STOP_WORDS.has(norm)) continue;
     const stem = stemTerm(norm);
-    if (stem.length < MIN_TOKEN_LENGTH) continue;
+    if (!acronym && stem.length < MIN_TOKEN_LENGTH) continue;
     if (seen.has(stem)) continue;
     seen.add(stem);
     out.push(stem);

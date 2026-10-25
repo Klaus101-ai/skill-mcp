@@ -57,7 +57,11 @@ against it (that is what a validation set is for). From M5 on:
    `[]` — the MCP `find` turns that into
    `{"ok":true,"items":[],"note":"ничего не найдено"}` and the plugin hint
    simply emits no block (both call the same `search()`).
-3. **Relative noise floor** (see M5 § Threshold below).
+3. **Relative noise floor** (see M5 § Threshold below; re-derived in M6).
+
+M6 amended steps 1–2: words are token-level (`next.js` stays one word, a
+hyphen splits), `why` attributes a field by token equality, and upper-case
+short acronyms became meaningful — see § M6.
 
 Stop words and short tokens are still indexed and still contribute to BM25
 scores (scoring semantics were not part of M5); they only lose the right to
@@ -132,10 +136,133 @@ Known risk for set B: a B query whose best score falls below 0.7 of its ceiling
 would be answered with `[]` (on A the closest call is 0.720); this is recorded
 in the M5 report as "not verified" until set B exists.
 
-Residual AC3 = 2 (#58, #59): their meaningful EN tokens («when/next/bus/airport»,
-«what/should/office») genuinely occur in skill texts — cutting them would mean
-cutting real hits (their ratios, 1.43 and 2.51, sit above every qrel query's
-minimum). They need semantics, not lexics; they are reported as-is, not hidden.
+Residual AC3 = 2 (#58, #59). **M6 correction (see § M6 § Diagnosis):** the M5
+wording below over-claimed — «bus», «airport» and «coffee» do NOT occur in any
+skill text at all, and «next» was taken out of the written word «Next.js» by
+the punctuation-splitting tokenizer; only the standalone function-like words
+«when/next» (#58) and «what/should» (#59) are real token-equal occurrences.
+Their ratios (1.43 and 2.51) sit above every qrel query's minimum, so cutting
+them would mean cutting real hits — they need semantics, not lexics; reported
+as-is, not hidden. M5 text kept verbatim as the historical record:
+
+> their meaningful EN tokens («when/next/bus/airport»,
+> «what/should/office») genuinely occur in skill texts — cutting them would mean
+> cutting real hits (their ratios, 1.43 and 2.51, sit above every qrel query's
+> minimum). They need semantics, not lexics; they are reported as-is, not hidden.
+
+## M6 § Token-level match, words, acronyms
+
+### Diagnosis (checked on the live index, not assumed)
+
+Two claims were verified against the real corpus (365 skills) **before** any
+code change:
+
+1. **«the gate compares substrings» — REFUTED for the gate itself.** The
+   `search()` gate compares normalized/stemmed tokens by *equality*
+   (MiniSearch `r.match` keys are document terms from the same pipeline), so
+   «bus» against the word «business» already answered `[]`
+   (stems: `bus` → `bus`, `business` → `busin`, `abuse` → `abuse`).
+2. **The substring really existed — in two other places:**
+   - `why` field attribution used `text.includes(term)`: a skill named
+     `Officer-training` with «office» only in its description was reported as
+     `matched name+description: office` (false credit to `name`);
+   - the tokenizer split on every non-alphanumeric character, so the written
+     word **«Next.js»** handed out a free `next` token — in #58's returned
+     skills «next» came ONLY from «Next.js» (build-recipes, gsap-react,
+     edge-case-auditor).
+
+Where each AC3 token actually occurs (indexed fields, *written* words with
+their dots/hyphens):
+
+| token | written words containing it | verdict |
+|---|---|---|
+| `bus` | `Business`, `business`, `abuse`, `business-website-skill` | never a word of its own; **never matched** (proof above) |
+| `airport` | — | absent from the corpus |
+| `coffee` | — | absent from the corpus |
+| `next` | `next`, `Next`, `next-steps`, `Next.js`, `Next.js-проекта`, `NextSlide`, `nextslide`, `React-Vue-Next` | mixed: standalone «next» exists; in #58's returned skills it came only from «Next.js» |
+| `when` | `when`, `When`, `WHEN`, `whenever` | standalone — the real cause of #58 |
+| `what` | `what`, `What`, `WHAT`, `whatever` | standalone — the real cause of #59 |
+| `should` | `should`, `Should`, `SHOULD` | standalone — the real cause of #59 |
+| `office` | `office`, `Office`, `Officer`, `officer` | standalone exists (`pep-screening`, `rospatent-application`) *and* inside «Officer» |
+
+So #58/#59 are **not** substring artifacts: they survive on genuine
+token-equal occurrences of function-like English words (`when`, `next`,
+`what`, `should`). The leftovers are semantic noise, not lexical noise.
+
+### Word rule (the implementation)
+
+A **word** is a run of letters/digits that may contain a **dot**, never a
+**hyphen** (`core/text.mjs` `tokenize`); the gate and `why` count a match only
+when a normalized/stemmed query token is **equal** to a word of the skill text.
+
+- **dot stays inside the word**: `next.js` is one word → `next` ∌ `next.js`
+  (required test), while the query «next.js» still matches the same text —
+  the rule is identical on both sides. The whole-word query folds as
+  `next.js` → `nextjs` → stem `nextj`.
+- **hyphen splits the word**: `gsap` **does** match `gsap-scrolltrigger`
+  (required decision — a hyphen joins independent words: `gsap-scrolltrigger`,
+  `next-steps`, and it is the boundary in mixed-script compounds like
+  `AI-документ`, which would otherwise become one unusable token). Tested in
+  `test/ac3.test.mjs`.
+
+### M6 § Acronyms (short-token whitelist)
+
+`MIN_TOKEN_LENGTH = 3` used to make every 2-char token unprovable, and #47
+(«Подготовь внутренний AI-документ…», qrels `aia-generation` +
+`use-case-triage-ai-governance`) overlaps with its qrels only through «AI» —
+both qrel skills were **filtered out by the gate** (their only shared terms
+were `ai` and the stop word `и`). Whitelist (Latin, written **upper case in
+the source**): `ai, ml, ui, ux, qa, pr, hr, it, ci, cd, db, api, sdk, gpu`.
+
+Why exactly these: they are the standard IT/UI/ML/quality/delivery acronyms
+that carry meaning on their own in skill texts and queries; `api/sdk/gpu` are
+3 chars anyway and are listed for completeness. Why **upper case only**:
+capitalization is the one signal separating an acronym from an ordinary word —
+lowercase `it` is the English pronoun (would prove a match in almost any
+English description), and the frozen M5 test (`significantQueryTokens("ai go x")
+== []`) fixes lower/mixed case as insignificant. RU stop words `и`, `в`, `с`,
+`на` are unchanged and still prove nothing.
+
+Effect on set A: exactly 4 queries gain a token — #23 `AI`, #44 `UI`, #45 `UX`,
+#47 `AI`. #23/#44/#45 keep ratios 6.33 / 2.92 / 3.51 (far above the floor);
+#47 see § M6 § Threshold.
+
+### M6 § Threshold (MIN_STRENGTH re-derived)
+
+The floor is still **needed**: without it 9 of the 10 `empty` queries return a
+non-empty list (only #52 fails the gate), i.e. AC3 would be 9/10, not 10/10 —
+token-level matching does not remove #58/#59 because their tokens are genuine
+standalone words. Re-derived on A **after** M6, same method as M5 (pre-floor
+best score of the gated list ÷ `corpusCeiling`, `measure`-independent script):
+
+| side | value | id |
+|---|---|---|
+| biggest `empty` ratio that must be cut | **0.6658** | #57 (M5: 0.6644) |
+| weakest qrel answer that is kept | **0.7171** | #32 (M5 recorded 0.720 for #7; recomputation on M5 code gives #32 = 0.7176 — same gap, M5's id/rounding was slightly off) |
+| selected | **0.7** = largest round value inside (0.6658; 0.7171] | — |
+
+Cut but metric-neutral (no qrel in their gated top-10): #4 (0.6123), #14
+(0.1187), #40 (0.4589). **Reported limitation, not tuned away:** #47 now has
+`use-case-triage-ai-governance` at gated rank 6 (the acronym fix works at the
+gate level), but its ratio is 0.4967 — three of its query tokens are absent
+from the corpus and add the theoretical bound to the ceiling — so the floor
+still answers #47 with `[]`, exactly as in M5. Lowering the floor to 0.5 would
+re-admit empty #57 (0.6658) and #55 (0.5015) → AC3 would fall to 4/10; that
+trade-off needs an owner decision and was **not** made unilaterally (no tuning
+to a single id).
+
+### M5 → M6 (set A, same commands)
+
+| metric | M5 | M6 |
+|---|---|---|
+| easy recall@5 / all@5 | 0.7714 / 0.7714 | 0.7714 / 0.7714 |
+| hard recall@5 / all@5 | 0.6000 / 0.2667 | 0.6000 / 0.2667 |
+| ALL recall@5 / all@5 | 0.7200 / 0.6200 | 0.7200 / 0.6200 |
+| ALL NDCG@10 | 0.6161 | 0.6161 |
+| AC3 non-empty | 2/10 (#58, #59) | 2/10 (#58, #59; #58's top list no longer contains `Next.js`-derived hits) |
+| draft set (28) product recall@5 | 0.9643 (27/28, MISS #13) | 0.9643 (27/28, MISS #13) |
+| warm search p95 | 1.68 ms | 2.38 ms (token-level `why` attribution; 2.3–3.0 ms across runs, ≤150 ms budget unaffected) |
+| weights winner | name ×3 / desc ×2 / head ×1 | unchanged (re-run, same winner) |
 
 ## Latency (`latency.mjs`)
 

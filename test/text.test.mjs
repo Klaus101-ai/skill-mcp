@@ -1,9 +1,10 @@
-// M5: normalization, light stemming and significant-token extraction
+// M5 + M6: normalization, light stemming and significant-token extraction
 // (core/text.mjs). These three properties back the AC3 gate and the shared
 // index/query pipeline: RU cases and EN forms must fold to one term, tokens
-// shorter than 3 chars must never be mangled, and the significance rules
-// (length >= 3, not a stop word, not punctuation) decide what may prove a
-// match.
+// shorter than 3 chars must never be mangled (whitelisted upper-case
+// acronyms excepted), and the significance rules (length >= 3 or acronym,
+// not a stop word, not punctuation) decide what may prove a match. M6 adds
+// the word rule: a dot keeps a word together, a hyphen splits it.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -14,6 +15,7 @@ import {
   stemTerm,
   processTerm,
   significantQueryTokens,
+  isShortAcronym,
 } from "../core/text.mjs";
 
 test("tokenize: letters and digits are tokens, everything else separates", () => {
@@ -66,6 +68,44 @@ test("processTerm: normalize + stem, junk becomes null", () => {
   assert.equal(processTerm("Всё"), "все");
   assert.equal(processTerm("!!!"), null);
   assert.equal(processTerm(""), null);
+});
+
+// ── M6: word rule (dot / hyphen) and the upper-case acronym whitelist ──────
+
+test("M6 word rule: a dot stays inside the word, a hyphen separates words", () => {
+  assert.deepEqual(tokenize("Next.js gsap-scrolltrigger"), ["Next.js", "gsap", "scrolltrigger"]);
+  assert.deepEqual(tokenize("договор. и т.д."), ["договор.", "и", "т.д."]);
+  assert.deepEqual(tokenize("!!! ... ---"), [], "punctuation-only runs are not words");
+  // same word either way: trailing punctuation is stripped by normalizeTerm
+  assert.equal(normalizeTerm("next.js"), normalizeTerm("Next.js"));
+  assert.equal(normalizeTerm("Next.js"), "nextjs");
+  // and both sides of the index fold identically (document «next.js», query «next.js»)
+  assert.equal(processTerm("Next.js"), processTerm("next.js"));
+});
+
+test("M6 acronyms: whitelisted short tokens are significant only in upper case", () => {
+  assert.deepEqual(significantQueryTokens("AI"), ["ai"]);
+  assert.deepEqual(significantQueryTokens("AI-документ"), ["ai", "документ"]);
+  assert.deepEqual(significantQueryTokens("PR HR IT"), ["pr", "hr", "it"]);
+  // lower/mixed case = ordinary word, stays insignificant (frozen M5 rule)
+  assert.deepEqual(significantQueryTokens("ai go x"), []);
+  assert.deepEqual(significantQueryTokens("it is ok"), [], "lowercase «it» is the pronoun");
+  // not on the whitelist -> never significant, whatever the case
+  assert.deepEqual(significantQueryTokens("GO"), []);
+  // RU stop words keep proving nothing
+  assert.deepEqual(significantQueryTokens("и в с на"), []);
+});
+
+test("M6 isShortAcronym: letters only, 2-3 of them, upper case, whitelisted", () => {
+  assert.equal(isShortAcronym("AI"), true);
+  assert.equal(isShortAcronym("AI."), true);
+  assert.equal(isShortAcronym("IT"), true);
+  assert.equal(isShortAcronym("ai"), false, "lower case");
+  assert.equal(isShortAcronym("Ai"), false, "mixed case");
+  assert.equal(isShortAcronym("A"), false, "1 letter");
+  assert.equal(isShortAcronym("NEXT"), false, "4 letters / not whitelisted");
+  assert.equal(isShortAcronym("GO"), false, "not whitelisted");
+  assert.equal(isShortAcronym("ИИ"), false, "not Latin whitelist");
 });
 
 test("significantQueryTokens: length >= 3, not a stop word, stems deduplicated", () => {

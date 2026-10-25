@@ -5,12 +5,14 @@ Local skill search and ranking for [opencode](https://opencode.ai). Indexes
 queries with a ranked list of matching skills. Everything runs locally:
 **no network, no LLM, no embeddings, no API keys, files are read-only.**
 
-Status: **M1 + M2 + M3 + M4 + M5** — core index, CLI smoke run, baseline
+Status: **M1 + M2 + M3 + M4 + M5 + M6** — core index, CLI smoke run, baseline
 evaluation, the **MCP server** (`server/`, stdio: `find` / `outline` /
 `read-section`), the **context hint plugin** (`plugin/`, `<skill_hint>` block
-before model dispatch), the held-out evaluation (**set A = validation**) and the
-**M5 pipeline**: normalization + light stemming, the AC3 significant-match gate
-and the relative noise floor.
+before model dispatch), the held-out evaluation (**set A = validation**), the
+**M5 pipeline** (normalization + light stemming, the AC3 significant-match gate
+and the relative noise floor) and the **M6 match semantics**: token-level
+equality instead of substrings, the dot/hyphen word rule and the upper-case
+acronym whitelist.
 
 ## Requirements
 
@@ -53,20 +55,28 @@ const hits = search(index, "bug bounty report", { limit: 5 });
   punctuation stripped, frequent RU/EN endings cut with a 3-character root
   floor — one pipeline injected as MiniSearch `tokenize` + `processTerm`, so
   documents and queries are treated identically.
+- **Word rule (M6)**: a word is letters/digits with an optional inner dot —
+  `next.js` is ONE word (the query `next` does **not** match it), while a
+  hyphen splits words: `gsap` matches `gsap-scrolltrigger`, and
+  `AI-документ` yields the two tokens `AI` + `документ`.
 - **AC3 significant-match gate**: a result is valid only if at least one
-  meaningful query token (≥3 chars, not in the frozen ru+en stop list) really
-  occurs in the skill's `name`+`description`+`headings`; otherwise `search()`
-  returns `[]` — the MCP `find` answers `note: "ничего не найдено"` and the
-  plugin simply shows no block. A relative noise floor then rejects weak
-  leftovers whose best score is under 70% of the corpus ceiling for that query
-  (derivation and the measured gap: [`measure/README.md`](measure/README.md)
-  § M5 § Threshold).
+  meaningful query token — ≥3 chars, or an **upper-case whitelisted
+  acronym** (`AI`, `ML`, `UI`, `UX`, `QA`, `PR`, `HR`, `IT`, `CI`, `CD`,
+  `DB`, `API`, `SDK`, `GPU`), not in the frozen ru+en stop list — is **equal**
+  to a token of the skill's `name`+`description`+`headings` (never a
+  substring of a longer word); otherwise `search()` returns `[]` — the MCP
+  `find` answers `note: "ничего не найдено"` and the plugin simply shows no
+  block. A relative noise floor then rejects weak leftovers whose best score
+  is under 70% of the corpus ceiling for that query (re-derived after M6 with
+  the measured gap: [`measure/README.md`](measure/README.md) § M6 § Threshold).
 - Duplicate skill names (the same skill installed in several roots) collapse
   to the best-scoring entry; backup directories (`_backup`, `_backups`,
   `.backup`, `backup`) are never indexed.
 - `why` is a single line, max 160 chars: matched fields plus up to 6
   significant terms (stop words and 1-character tokens are dropped; terms are
-  shown in their stemmed form).
+  shown in their stemmed form). Field attribution is token-level (M6): a
+  field is credited only when it really contains an equal token — a substring
+  does not count (`Officer` never proves `office`).
 - `restrict_to: ["name-or-glob*"]` filters results to an allowlist of skill names.
 - Empty / whitespace / punctuation-only queries — and queries with no
   meaningful token that any skill text matches — return `[]`: no random hints.

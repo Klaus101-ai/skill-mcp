@@ -13,7 +13,7 @@ const FIELD_BOOST = { name: 3, description: 2, headings: 1 };
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
-// --- relative noise floor (M5, item 4) -------------------------------------
+// --- relative noise floor (M5 item 4, re-derived in M6) ---------------------
 // A result list survives only when its BEST score reaches MIN_STRENGTH of the
 // corpus ceiling for this query. The ceiling is, per meaningful query token,
 // the best score that token achieves anywhere in the corpus (a one-term
@@ -23,10 +23,15 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 // query whose rare tokens are absent from the corpus from getting a tiny
 // denominator for free.
 //
-// MIN_STRENGTH = 0.7 sits inside the measured gap of the A set
-// (measure/README.md § Threshold): the biggest empty-query leftover scores
-// 0.664 of its ceiling, the weakest of all 50 qrel queries scores 0.720 —
-// so 0.7 cuts the leftovers and provably touches no easy/hard query on A.
+// MIN_STRENGTH = 0.7 re-derived on set A AFTER the M6 token-level match and
+// the acronym whitelist (measure/README.md § M6 § Threshold):
+//   - biggest `empty`-query ratio that still must be cut: 0.6658 (#57);
+//   - weakest ratio among the qrel answers that are kept: 0.7171 (#32);
+//   - 0.7 is again the largest round value inside that measured gap.
+// Known and reported (NOT tuned away): #47 sits at 0.4967 because its query
+// carries three corpus-absent tokens; the floor keeps answering it with [],
+// same as in M5 — lowering the floor to rescue it would re-admit empty #57
+// (0.6658) and #55 (0.5015), so it is an owner decision, not a code change.
 const MIN_STRENGTH = 0.7;
 const BM25_SATURATION = 0.5 + 1.2 + 1; // d + (k + 1) with k=1.2, b irrelevant at tf -> inf
 
@@ -97,17 +102,27 @@ function makeFilter(restrictTo) {
 
 function buildWhy(result) {
   const terms = significantTerms(result.terms || []).slice(0, WHY_TERMS_LIMIT);
+  // Field attribution is TOKEN-level (M6), never `text.includes(term)`: a
+  // matched term counts for a field only when that field really contains a
+  // word that normalizes/stems to it (otherwise «office» would be credited to
+  // the name «Officer-training», which holds it only as a substring). The
+  // scan stops at the first word that proves the field, keeping `why`
+  // formation inside the latency budget.
+  const wanted = new Set(terms);
+  const fieldHolds = (text) => {
+    if (wanted.size === 0) return false;
+    for (const raw of tokenize(text)) {
+      const term = processTerm(raw);
+      if (term !== null && wanted.has(term)) return true;
+    }
+    return false;
+  };
   const haystacks = [
     ["name", String(result.name || "")],
     ["description", String(result.description || "")],
     ["headings", String(result.headings || "")],
   ];
-  const fields = haystacks
-    .filter(([, text]) => {
-      const hay = text.toLowerCase();
-      return terms.some((t) => hay.includes(t));
-    })
-    .map(([field]) => field);
+  const fields = haystacks.filter(([, text]) => fieldHolds(text)).map(([field]) => field);
   let why;
   if (terms.length > 0) {
     why = fields.length
@@ -187,15 +202,18 @@ export function selectWinner(candidates) {
  * duplicate skill names collapsed to their best-scoring entry.
  * Empty / whitespace-only / punctuation-only queries return [].
  *
- * AC3 significant-match gate (M5): the query first yields its meaningful
- * tokens (>= 3 chars, not stop words, normalized + stemmed — core/text.mjs).
- * If there are none, or if no result document actually contains at least one
- * of them in name/description/headings, the answer is []. MiniSearch's
- * `r.match` lists the document terms that matched this query, already
- * normalized/stemmed by the very same pipeline, so the containment check is
- * exact and needs no second index. This one gate is the whole AC3 story for
- * every consumer: the MCP `find` (note "ничего не найдено") and the plugin
- * hint (no block) both simply call `search()` and show nothing on [].
+ * AC3 significant-match gate (M5 gate, M6 token-level match): the query
+ * first yields its meaningful tokens (>= 3 chars or a whitelisted upper-case
+ * acronym, not stop words, normalized + stemmed — core/text.mjs). If there
+ * are none, or if no result document actually contains at least one EQUAL
+ * token (same normalization/stemming — never a substring of a longer word;
+ * a dot keeps words together, a hyphen splits them) in
+ * name/description/headings, the answer is []. MiniSearch's `r.match` lists
+ * the document terms that matched this query, already normalized/stemmed by
+ * the very same pipeline, so the containment check is exact and needs no
+ * second index. This one gate is the whole AC3 story for every consumer: the
+ * MCP `find` (note "ничего не найдено") and the plugin hint (no block) both
+ * simply call `search()` and show nothing on [].
  *
  * `boost` optionally overrides the field weights (used by measure/weights.mjs
  * to compare weight candidates on the A set without editing this file).
