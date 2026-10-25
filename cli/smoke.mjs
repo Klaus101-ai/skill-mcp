@@ -6,11 +6,13 @@ import { buildIndex, search } from "../core/index.mjs";
 const roots = defaultRoots();
 
 const t0 = performance.now();
-const skills = discoverSkills(roots);
+const { skills, skipped } = discoverSkills(roots);
 const index = buildIndex(skills);
 const buildMs = performance.now() - t0;
 
 console.log(`skills found: ${skills.length}`);
+console.log(`skipped: ${skipped.length}`);
+for (const s of skipped) console.log(`  - ${s.path} (${s.reason})`);
 console.log(`roots: ${roots.length}`);
 for (const r of roots) console.log(`  - ${r}`);
 console.log(`index build: ${buildMs.toFixed(1)} ms`);

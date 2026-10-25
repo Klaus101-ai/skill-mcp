@@ -67,7 +67,7 @@ class Bm25 {
   }
 }
 
-const skills = discoverSkills(defaultRoots());
+const { skills } = discoverSkills(defaultRoots());
 const bm25 = new Bm25(
   skills.map((s) => ({
     name: s.name,

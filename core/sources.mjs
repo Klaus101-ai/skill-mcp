@@ -5,7 +5,10 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const SKIP_DIRS = new Set(["node_modules", ".git"]);
+// Backup/junk directories are never indexed (review finding: copies under
+// `_backup` duplicated skill names in the index). Matched by exact segment
+// name, not by a substring of the whole path.
+const SKIP_DIRS = new Set(["node_modules", ".git", "_backup", "_backups", ".backup", "backup"]);
 
 /** Default skill roots that actually exist, including the project one. */
 export function defaultRoots(cwd = process.cwd()) {
@@ -39,16 +42,20 @@ function unquote(value) {
 }
 
 const BLOCK_HEADER = /^[A-Za-z_][\w-]*:\s*[|>][-+]?\s*$/;
-const KV_LINE = /^([A-Za-z_][\w-]*):\s*(.*)$/;
+// A key line may carry leading whitespace (` description: ...`): such a line
+// is recognised as a key instead of being silently dropped.
+const KV_LINE = /^\s*([A-Za-z_][\w-]*):\s*(.*)$/;
 
 /**
  * Minimal YAML-subset frontmatter parser: `key: value` pairs, quoted values,
  * folded continuation lines and `|` / `>` block scalars. No external parser.
- * Returns { data, body, hasFrontmatter }.
+ * A UTF-8 BOM at the start of the file is stripped before parsing.
+ * Returns { data, body, hasFrontmatter, bodyLineOffset }.
  */
 export function parseFrontmatter(text) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-  if (!m) return { data: {}, body: text, hasFrontmatter: false };
+  const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const m = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(src);
+  if (!m) return { data: {}, body: src, hasFrontmatter: false, bodyLineOffset: 0 };
 
   const data = {};
   const lines = m[1].split(/\r?\n/);
@@ -102,7 +109,30 @@ export function parseFrontmatter(text) {
     data[key] = unquote(value);
   }
 
-  return { data, body: text.slice(m[0].length), hasFrontmatter: true };
+  const bodyLineOffset = m[0].split(/\r?\n/).length - 1;
+  return { data, body: src.slice(m[0].length), hasFrontmatter: true, bodyLineOffset };
+}
+
+/**
+ * Headings of the given text with level, text and 1-based line number in the
+ * file (frontmatter offset accounted for), skipping fenced code blocks.
+ */
+export function extractHeadingEntries(text) {
+  const { body, bodyLineOffset } = parseFrontmatter(text);
+  const out = [];
+  let fenced = false;
+  let lineNo = bodyLineOffset;
+  for (const line of body.split(/\r?\n/)) {
+    lineNo += 1;
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (m) out.push({ level: m[1].length, text: m[2], line: lineNo });
+  }
+  return out;
 }
 
 /** Headings of the body, skipping fenced code blocks. */
@@ -141,25 +171,47 @@ function* walk(dir) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       yield* walk(full);
-    } else if (entry.isFile() && entry.name === "SKILL.md") {
+    } else if (entry.name === "SKILL.md" && (entry.isFile() || entry.isSymbolicLink())) {
+      // Symlinks are yielded too: whether the target stays inside its root is
+      // decided by discoverSkills against the same boundary as resolveSkillPath.
       yield full;
     }
   }
 }
 
+/** Same boundary check as resolveSkillPath: is real target inside real root? */
+export function isInsideRoot(realRoot, realTarget) {
+  const rel = path.relative(realRoot, realTarget);
+  return !(rel === "" || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel));
+}
+
 /**
  * Recursively discover SKILL.md files under the given roots.
- * Returns [{ name, path, description, bodyHeadings, root }]; duplicates
- * (same real path reached from different roots) are collapsed.
+ * Returns { skills, skipped }: skills is [{ name, path, description,
+ * bodyHeadings, root }] with duplicates (same real path reached from
+ * different roots) collapsed; skipped lists files that were not indexed,
+ * currently symlinks whose real path escapes the root they were reached
+ * from ({ path, root, reason: "outside-root" }).
  */
 export function discoverSkills(roots = defaultRoots()) {
   const seen = new Map();
+  const skipped = [];
   for (const root of roots) {
+    let realRoot;
+    try {
+      realRoot = fs.realpathSync(root);
+    } catch {
+      continue;
+    }
     for (const file of walk(root)) {
       let real;
       try {
         real = fs.realpathSync(file);
       } catch {
+        continue;
+      }
+      if (!isInsideRoot(realRoot, real)) {
+        skipped.push({ path: file, root, reason: "outside-root" });
         continue;
       }
       if (seen.has(real)) continue;
@@ -179,7 +231,7 @@ export function discoverSkills(roots = defaultRoots()) {
       });
     }
   }
-  return [...seen.values()];
+  return { skills: [...seen.values()], skipped };
 }
 
 export class PathForbiddenError extends Error {
@@ -217,8 +269,7 @@ export function resolveSkillPath(skill, root) {
   } catch {
     throw new PathNotFoundError(`cannot resolve path: ${target}`);
   }
-  const rel = path.relative(realRoot, realFile);
-  if (rel === "" || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+  if (!isInsideRoot(realRoot, realFile)) {
     throw new PathForbiddenError(`path escapes skill root: ${target}`);
   }
   return realFile;

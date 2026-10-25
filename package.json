@@ -10,7 +10,8 @@
   "scripts": {
     "test": "node --test",
     "smoke": "node cli/smoke.mjs",
-    "measure": "node measure/baseline.mjs --k 5"
+    "measure": "node measure/baseline.mjs --k 5",
+    "server": "node server/index.mjs"
   },
   "dependencies": {
     "minisearch": "7.2.0"
