@@ -461,6 +461,166 @@ rule cut every candidate; five hard misses lose one of two qrels each (their
 measure/heldout-b.jsonl` (human + `--json`). `node measure/latency.mjs` →
 warm p95 2.55 ms (search) / 2.34 ms (hint path), first call 370.14 ms.
 
+## M9 § Informative tokens (IDF-lite) + typo tolerance
+
+Task-driven fix for the two failure shapes diagnosed on set B after M8: short,
+precise queries answered with `[]` (#3 «выбрать режим налогобложения для ИП»),
+and junk queries covered by COMMON words (#53/#56/#57). Two additions to the
+coverage rule (`core/index.mjs`, `core/text.mjs`); no change to sets, field
+weights, stemmer or tokenization.
+
+### The rule
+
+1. **Only rare tokens count toward coverage (IDF-lite).** A significant query
+   token counts as a match only when it is rare in the corpus:
+   `df <= 8% of the skills`. On the 365-skill corpus
+   `rareDfMax(365) = max(3, floor(0.08 × 365)) = 29 documents`. The rule is
+   `need = min(2, N_informative)` — the M7 rule with `N` narrowed to the
+   informative tokens; `N_informative = 0` (only common words left) answers
+   `[]`, which the MCP `find` reports with its standard
+   `{ok:true, items:[], note:"ничего не найдено"}` (no new note path).
+   Common words are NOT removed from the query: they still hit the BM25 index
+   and still **rank** the list — they just can no longer **validate** it.
+   Two details worth stating:
+   - **df scope = the indexed corpus** (`name + description + headings`) — the
+     same text search reads and coverage matches, so a rare term really
+     narrows the searchable skills (see the scope section below);
+   - **an unseen token borrows the df of its closest match**: for a token with
+     `df = 0` (typically a misspelling) the effective df is the minimum df of
+     its distance-1 neighbours, so a typo of a common word cannot launder its
+     way into coverage as a "rare" token;
+   - **small corpora**: 8% of fewer than 38 skills is under 3 documents, so
+     the ceiling is floored at 3 documents (`MIN_RARE_DF`). Without the floor
+     every word shared by two fixture skills would be "common" and a 2-token
+     query could never be covered. On the real corpus the floor is inert
+     (3 < 29).
+
+2. **One typo for long tokens.** A query token of length ≥ 6 may match a
+   corpus term at Levenshtein distance ≤ 1 (one insertion, deletion or
+   substitution — `withinOneEdit`, O(len) with early exit, tested). The
+   candidates come from an index over corpus terms keyed by **first letter and
+   length**, and only the neighbouring buckets (`len-1`, `len`, `len+1`) are
+   consulted — no O(vocabulary × query) scan. The typo match counts for
+   coverage and is shown in `why` prefixed with `≈`
+   (`matched name+description: режим, ≈налогообложен`). Tokens shorter than 6
+   are exact-only («сайта» is never turned into «сайт» by this path — that
+   folding, where it happens at all, is the M5 stemmer), and **one** typo per
+   token is the limit («wrokflow» ∌ «workflow»: a transposition is two edits).
+
+### Why 8% — the df distribution behind the ceiling
+
+`df` over the indexed corpus: **6694 distinct terms** in 365 skills;
+the ceiling is `29 documents = 8.0% of the skills`.
+
+| df (skills containing the term) | terms | share of vocabulary |
+|---|---|---|
+| 1 | 3394 | 50.7% |
+| 2 | 1120 | 16.7% |
+| 3–5 | 1145 | 17.1% |
+| 6–15 | 723 | 10.8% |
+| 16–29 (rare, ≤ ceiling) | 181 | 2.7% |
+| 30–73 (common) | 91 | 1.4% |
+| 74–146 (common) | 28 | 0.4% |
+| 147+ (common) | 12 | 0.2% |
+| **total / above ceiling** | **6694 / 131** | **100% / 2.0%** |
+
+Only **2.0% (131 terms)** of the vocabulary is that generic — and it is
+exactly the glue: `use(200), when(175), workflow(156), a(155), to(151),
+the(149), для(147), юридическ(145), and(144), disclaimer(143), or(139),
+output(134), шаг(133), назначен(126), skill(125), не(120)…`. Everything below
+the ceiling (98.0%) is genuine topic vocabulary: `договор(26), сервис(12),
+загрузить(3), подрядчик(1)…`. The ceiling therefore does not clip topical
+words at corpus scale: on set A, **22 of 398 significant query tokens (5.5%,
+14 distinct words)** cross it — `review(83)×4, проверк(38)×3, need(41)×3,
+ai(40)×2, срок(36), framework(34), step(52), draft(36), check(69),
+design(41), system(30), code(40), data(38), proc(43)`.
+
+### df scope: indexed corpus vs whole SKILL.md (the one judgment call)
+
+«Corpus» is ambiguous here, and the two readings were both measured on set A:
+
+| df counted over… | «документы» | «данные» | «сайт» | «работы» | set A easy/hard/all recall@5 | AC2 on A |
+|---|---|---|---|---|---|---|
+| indexed fields (name+desc+headings) — **committed** | 24 rare | 11 rare | 6 rare | 19 rare | **0.7429 / 0.6667 / 0.7200** | YES (0.72 ≥ 0.70) |
+| whole SKILL.md (frontmatter + body) — measured, rejected | 88 common | 161 common | 28 rare | 68 common | 0.4286 / 0.2000 / 0.3600 | **NO** (0.36 < 0.70) |
+
+The whole-file reading matches the examples in the M9 brief
+(«документы», «данные», «работы» are common there; «сайт» stays rare in BOTH
+readings — 28 ≤ 29), but it declares generic every word that merely appears
+somewhere in a body while being searchable in only a handful of skills
+(«работы»: 68 bodies, 19 searchable texts) and collapses retrieval to 0.3600.
+The committed scope keeps df calibrated to the text where a match can actually
+happen. **This is the one interpretation decision of M9** — switching it is a
+one-line change in `buildIndex`, both measurements are recorded above so the
+choice can be re-taken knowingly.
+
+### M7 → M9 (set A, same commands)
+
+| metric | M7 | **M9** |
+|---|---|---|
+| easy recall@5 / all@5 | 0.7714 / 0.7714 | **0.7429 / 0.7429** (26/35, −1) |
+| easy NDCG@10 | 0.6814 | **0.6529** |
+| hard recall@5 / all@5 | 0.7333 / 0.2667 | **0.6667 / 0.3333** (10/15, −1; all@5 4/15 → 5/15) |
+| hard NDCG@10 | 0.5349 | **0.4835** |
+| ALL recall@5 / all@5 | 0.7600 / 0.6200 | **0.7200 / 0.6200** (36/50, −2) |
+| ALL NDCG@10 | 0.6375 | **0.6021** |
+| AC2 (product ≥ baseline on A) | YES (0.7600 vs 0.7000) | **YES (0.7200 vs 0.7000)** |
+| AC3 non-empty | 0/10 | **0/10** |
+| draft set (28) recall@5 | 1.0000 (28/28) | **0.8929 (25/28)** |
+| warm search p95 | 2.14 ms | **3.79 ms** (hint path 2.77 ms; budget 150 ms) |
+| weights winner | 3/2/1 | **3/2/1 (unchanged)** |
+| tests | 92 (91 pass) | **102 (101 pass, 1 skipped symlink)** |
+
+**The three set-A targets in the M9 brief (≥0.7714 / ≥0.7333 / ≥0.7600) are
+NOT met — shown, not masked.** Every point of the drop is the specified rule
+doing what it says: a query hit lost its SECOND covered token because that
+token is common:
+
+- **#33 «Design a logo for my coffee shop»** (easy, was hit → now `[]`):
+  `logo-design` matched `design(41) + logo(4)` under M7; `design` = 41/365 =
+  11.2% > 8%, so it stops counting and only `logo` remains (1 < 2).
+  `near(coffee) = ∅` — no typo candidate rescues it.
+- **#44 «The UI is messy and the code behind it is tangled…»** (hard, was hit
+  → now `[]` at the top): `refactoring-ui` matched `ui(15) + code(40)`;
+  `code` = 11.0% > 8% stops counting (1 < 2), while `tailwindcss` and
+  `browser-testing-with-devtools` (both `ui + clean`) legitimately pass —
+  they carry two rare tokens.
+- **#49 «Review the data processing addendum…»** (hard): `review(83),
+  data(38), proc(43)` are all common → left the top-10 (NDCG effect; it was
+  already a non-hit).
+
+Per-query diff M7 → M9 over all 50 qrel queries (temporary `_m9_diff.mjs`,
+deleted after the run, dump kept in `writer-report.md`): **23 unchanged, 27
+changed, 2 hits lost (#33, #44), 0 hits gained, 3 qrels left the top-10
+(#33, #44, #49), 2 queries became `[]` (#33, #49)**. No query went
+MISS → hit. The one positive movement is on `hard all@5`
+(0.2667 → 0.3333): #41's second qrel `security-audit` rises into the top-5
+once non-covering leftovers are cut — the same mechanism M7 reported.
+
+### Draft set (28, `measure/queries.jsonl`): regression, itemized
+
+1.0000 → **0.8929 (25/28)**; all three misses are common-token cuts
+(temporary `_m9_draft.mjs`, deleted after the run):
+
+- **#1 «review a commercial contract»**: `review(83)` stops counting;
+  `contract-review` holds `contract(26)` + `review` → 1 < 2 (and its
+  «коммерческог» is the Russian word, not the query's `commercial`).
+- **#7 «draft a non disclosure agreement NDA»**: `draft(36)` stops counting;
+  `nda-draft` holds `nda(7)` only of the informative set → 1 < 2.
+- **#13 «debug failing test systematically»**: `test(30)` stops counting;
+  `debugging-and-error-recovery` holds `fail(9)` (+ `test`) → 1 < 2, and
+  `systematic-debugging` holds `test` + `failure` (≠ `fail`) → 0.
+
+### Checks run for M9
+
+`npm test` → 102 tests, 101 pass, 1 skipped (symlink EPERM, unchanged),
+0 fail — including 10 new M9 tests (rarity ×3, typo ×4, `withinOneEdit` ×3).
+`node measure/run.mjs` (set A, table above; AC3 0/10). `node measure/latency.mjs`
+(search p95 3.79 ms, hint p95 2.77 ms, index build 402.78 ms, first call
+643.36 ms). `node measure/weights.mjs` → winner `name 3 / desc 2 / headings 1`
+unchanged, no candidate beats it. Draft set 28 → 25/28 (itemized above).
+Set B was NOT re-run (acceptance set, off-limits after M8).
+
 ## Latency (`latency.mjs`)
 
 Same path as the plugin (`plugin/hint.mjs` `createContextHook`): one factory

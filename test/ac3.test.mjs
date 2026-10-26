@@ -8,7 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildIndex, search } from "../core/index.mjs";
+import { buildIndex, search, rareDfMax } from "../core/index.mjs";
 import { createContextHook } from "../plugin/hint.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -149,6 +149,8 @@ test("M7 coverage: «office» alone does not answer a 3-token query (AC3 #59 sha
 });
 
 test("M7 coverage N=5: regression «договор аренды офис депозит продление»", () => {
+  // M9 keeps this exact expectation: all five tokens are rare in this
+  // fixture corpus (df 0..2 <= rareDfMax(2) = 3), so need stays min(2, 5) = 2.
   const good = buildIndex([
     skill("skill-lease", "договор аренды офиса: депозит и продление"),
     skill("skill-unrelated", "совсем другой текст про котов"),
@@ -217,4 +219,92 @@ test("plugin: meaningful match still produces exactly one block", () => {
   createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
   assert.equal(ev.system.length, 2, "one block appended");
   assert.ok(ev.system[1].text.includes("skill-delta"));
+});
+
+// ── M9: informative tokens (IDF-lite) + typo tolerance ──────────────────────
+
+function m9Skill(name, description) {
+  return { name, path: `C:/x/${name}/SKILL.md`, description, bodyHeadings: [] };
+}
+
+test("M9 rarity: a word common in the corpus gives NO coverage (df > 8% of skills)", () => {
+  // «документы» occurs in 5 of 6 skills: df 5 > rareDfMax(6) = 3 -> common.
+  const idx = buildIndex([
+    m9Skill("skill-fin", "документы для отчётности компании"),
+    m9Skill("skill-hr", "документы кадрового учёта"),
+    m9Skill("skill-acc", "документы бухгалтерии"),
+    m9Skill("skill-loan", "документы по залогу"),
+    m9Skill("skill-notary", "документы нотариуса и заверения"),
+    m9Skill("skill-cats", "совсем про котов"),
+  ]);
+  assert.ok(5 > rareDfMax(6), "fixture check: 5 documents must be above the rare ceiling");
+  // the raw index DOES see the word (it still reaches BM25 and ranks) …
+  assert.ok(idx.search("документы").length >= 1, "the common word must still be searchable");
+  // … but on its own it proves nothing: N_informative = 0 -> [] (M9).
+  assert.deepEqual(search(idx, "документы", { limit: 5 }), [], "a corpus-wide word can never prove a topic");
+});
+
+test("M9 rarity: one RARE + one common token -> N_informative = 1, so ONE rare match is the whole proof", () => {
+  const idx = buildIndex([
+    m9Skill("skill-fin", "документы для отчётности компании"),
+    m9Skill("skill-hr", "документы кадрового учёта"),
+    m9Skill("skill-acc", "документы бухгалтерии"),
+    m9Skill("skill-loan", "документы по залогу"),
+    m9Skill("skill-notary", "документы нотариуса и заверения"),
+    m9Skill("skill-cats", "совсем про котов"),
+  ]);
+  // EXPECTATION (stated, not fitted): «документы» is common (df 5 > 3),
+  // «нотариус» is rare (df 1 <= 3) -> N_informative = 1 -> need = min(2, 1) = 1.
+  // Therefore the skill holding the RARE token survives on that one match,
+  // and every skill holding only the common word is cut (0 < 1) even though
+  // MiniSearch matched «документы» in them.
+  assert.ok(idx.search("документы нотариус").length >= 1, "both words are still in the BM25 query");
+  const results = search(idx, "документы нотариус", { limit: 5 });
+  assert.deepEqual(results.map((r) => r.name), ["skill-notary"], "only the rare-token match counts as coverage");
+});
+
+test("M9 rarity: two rare tokens, both matched -> passes (need = min(2, 2))", () => {
+  const idx = buildIndex([
+    m9Skill("skill-apostille", "нотариус и апостиль для легализации"),
+    m9Skill("skill-cats", "совсем про котов"),
+  ]);
+  // both tokens are rare (df 1 each <= rareDfMax(2) = 3) -> need 2
+  assert.deepEqual(search(idx, "нотариус апостиль", { limit: 5 }).map((r) => r.name), ["skill-apostille"]);
+  // one of two matched is still cut (unchanged M7 shape)
+  assert.deepEqual(search(idx, "нотариус кальян", { limit: 5 }), [], "1 of 2 informative tokens proves nothing");
+});
+
+test("M9 typo: «договр» (one edit) matches «договор» and is marked ≈ in why", () => {
+  const idx = buildIndex([m9Skill("skill-lease", "договор аренды офиса и склада")]);
+  assert.deepEqual(search(idx, "договр", { limit: 5 }).length === 0, false, "the typo must be rescued");
+  const results = search(idx, "договр", { limit: 5 });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].name, "skill-lease");
+  assert.match(results[0].why, /≈договор/, `typo match must be visible in why: ${results[0].why}`);
+  // the exact spelling still answers the same way (no double-counting)
+  assert.equal(search(idx, "договор", { limit: 5 }).length, 1);
+});
+
+test("M9 typo RU: «налогобложения» (one letter lost) matches «налогообложения»", () => {
+  const idx = buildIndex([m9Skill("tax-system-choice", "выбор режима налогообложения для ИП")]);
+  const results = search(idx, "выбрать режим налогобложения для ИП", { limit: 5 });
+  assert.equal(results.length, 1, "the B-set #3 shape must now find its skill");
+  assert.equal(results[0].name, "tax-system-choice");
+  assert.match(results[0].why, /≈налогообложен/, `why must show the ≈ term: ${results[0].why}`);
+});
+
+test("M9 typo limit: distance 2 is never a match («wrokflow» vs «workflow»)", () => {
+  const idx = buildIndex([m9Skill("skill-ci", "workflow builder guide")]);
+  assert.equal(search(idx, "workflow", { limit: 5 }).length, 1, "control: the exact word answers");
+  assert.deepEqual(search(idx, "wrokflow", { limit: 5 }), [], "two edits (a transposition) are out of scope");
+});
+
+test("M9 typo gate: tokens shorter than 6 chars match EXACTLY only", () => {
+  const idx = buildIndex([m9Skill("skill-stay", "hotel booking guide")]);
+  // «hoter» is at distance 1 from «hotel», but both are 5 chars -> no typo path.
+  assert.deepEqual(search(idx, "hoter", { limit: 5 }), [], "a 5-char token never gets typo tolerance");
+  assert.equal(search(idx, "hotel", { limit: 5 }).length, 1, "control: the exact word answers");
+  // «сайта»/«сайт» (5) is folded by the stemmer (M5) — never by two typos.
+  const site = buildIndex([m9Skill("skill-site", "сайт про кошки")]);
+  assert.equal(search(site, "сайта", { limit: 5 }).length, 1, "stemming, not typo tolerance");
 });
