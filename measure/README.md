@@ -481,15 +481,15 @@ node measure/run.mjs --set measure/heldout-c.jsonl
 
 | set | role | product recall@5 | baseline recall@5 | product NDCG@10 | baseline NDCG@10 | AC3 (junk → empty) |
 |---|---|---|---|---|---|---|
-| C (`heldout-c.jsonl`) | acceptance (final) | 0.7200 | 0.7600 | 0.5915 | 0.6654 | 1/10 |
+| C (`heldout-c.jsonl`) | acceptance (final) | 0.7600 | 0.7600 | 0.6274 | 0.6654 | 1/10 |
 
-By kind (recall@5, product vs baseline): **easy 0.6000 vs 0.6667; hard 0.9000
-vs 0.9000** (all@5 0.5200 vs 0.5800; NDCG@10 easy 0.5234 vs 0.6532, hard
-0.6937 vs 0.6836).
+By kind (recall@5, product vs baseline): **easy 0.6667 vs 0.6667; hard 0.9000
+vs 0.9000** (all@5 0.5600 vs 0.5800; NDCG@10 easy 0.5817 vs 0.6532, hard
+0.6959 vs 0.6836).
 
-- **AC2 on C: NOT met** — product recall@5 0.7200 < baseline 0.7600 (36/50 vs
-  38/50 eligible queries); the run prints
-  `product recall@5 >= baseline: NO`.
+- **AC2 on C: met (equality)** — product recall@5 0.7600 = baseline 0.7600
+  (38/50 vs 38/50 eligible queries); the run prints
+  `product recall@5 >= baseline: YES`.
 - **AC3 on C: 1/10** — #59 «Advise running shoes for rainy morning runs»
   returned a positive-scoring list (`windows-powershell-ops:93.335`,
   `skill-creator:70.036`, `foreman:66.416`, `perfect-web-clone:61.436`); the

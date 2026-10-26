@@ -29,9 +29,9 @@ A / B / C measured, v0.3 split search from the hint.**
   AC3 «no random hints» binds the **hint** (measured by `measure/hint.mjs`),
   not the full `find` output — see **Search vs hint** and `docs/contract.md`.
 - Final acceptance sets **A / B / C** are measured; the acceptance verdict is
-  mixed — two of the eight acceptance criteria fail (`AC2` on B and C, `AC3`
-  for the hint on B and C). See **Evaluation**, **Known limitations** and the
-  reproduction commands in **Verification**.
+  mixed — one of the eight acceptance criteria fails (`AC3` for the hint on B
+  and C; `AC2` holds on B and C as equality). See **Evaluation**, **Known
+  limitations** and the reproduction commands in **Verification**.
 
 This is an early release (**v0.1**) with the limitations listed below — read
 them before relying on it.
@@ -504,17 +504,17 @@ The product contract (R1–R6, hint block, tool contracts, safety guarantees):
 
 Three fixed sets, each written independently before any run on it (60 queries
 each, 365 skills in the index); numbers are **as measured** on 26.10.2026 after
-**v0.3**, not rounded or adjusted:
+**v0.3.1**, not rounded or adjusted:
 
 | set | role | product recall@5 | baseline recall@5 | product NDCG@10 | baseline NDCG@10 | hint junk (`empty`, target 0/10) |
 |---|---|---|---|---|---|---|
-| A (`measure/heldout.jsonl`) | validation | 0.7200 | 0.7000 | 0.6305 | 0.6368 | 0/10 |
-| B (`measure/heldout-b.jsonl`) | acceptance | 0.7800 | 0.8400 | 0.6541 | 0.6624 | 3/10 |
-| C (`measure/heldout-c.jsonl`) | acceptance (final) | 0.7400 | 0.7600 | 0.5974 | 0.6654 | 1/10 |
+| A (`measure/heldout.jsonl`) | validation | 0.7600 | 0.7000 | 0.6523 | 0.6368 | 0/10 |
+| B (`measure/heldout-b.jsonl`) | acceptance | 0.8400 | 0.8400 | 0.6843 | 0.6624 | 3/10 |
+| C (`measure/heldout-c.jsonl`) | acceptance (final) | 0.7600 | 0.7600 | 0.6274 | 0.6654 | 1/10 |
 
-**v0.3 before/after (same sets, same commands, 26.10.2026).** Recall@5 is now
-computed on the **full** list (no gate), the AC3 column is the **hint's**
-junk-rate from `measure/hint.mjs`:
+**history (v0.3) — before/after (same sets, same commands, 26.10.2026).**
+Recall@5 is now computed on the **full** list (no gate), the AC3 column is
+the **hint's** junk-rate from `measure/hint.mjs`:
 
 | set | recall@5 before → after | NDCG@10 before → after | hint junk before → after |
 |---|---|---|---|
@@ -522,26 +522,30 @@ junk-rate from `measure/hint.mjs`:
 | B | 0.7800 → **0.7800** | 0.6354 → **0.6541** | 3/10 → 3/10 |
 | C | 0.7200 → **0.7400** | 0.5921 → **0.5974** | 1/10 → 1/10 |
 
-Honest reading: the split **helped C** (0.7200 → 0.7400) and left B's recall
-unchanged while its NDCG rose; on the validation set A the full-list recall
-**fell** 0.7600 → 0.7200 (easy stayed 0.7714, hard 0.7333 → 0.6000) — with no
-gate left to clear the top-5, non-confident high-scoring matches now occupy
-slots that used to be cleaned before scoring. The expected «≥ baseline on at
-least one of B/C» did **not** happen: B is 0.7800 vs 0.8400, C is 0.7400 vs
-0.7600 — both still below baseline, as reported. The **hint did not move at
-all**: formed/hit/junk are identical before and after on all three sets (the
-rule feeding it is byte-for-byte the same one), which is exactly what the
+Honest reading (v0.3.1): on the validation set A recall@5 is **0.7600 vs
+baseline 0.7000** — it does **not** fall (easy 0.7714, hard 0.7333), because
+`confident:true` positions now rank above unconfirmed ones. The expected
+«≥ baseline on at least one of B/C» was **met as equality on B and C**: B is
+0.8400 = 0.8400, C is 0.7600 = 0.7600. NDCG@10 is mixed — **above** baseline
+on A (0.6523 vs 0.6368) and on B (0.6843 vs 0.6624), **below** on C (0.6274 vs
+0.6654). History (v0.3, same sets): before the ordering fix A read 0.7200
+(hard 0.6000) and B/C read 0.7800 / 0.7400 — that intermediate drop is what
+the confident-first order removed. The **hint did not move at all**:
+formed/hit/junk are identical before and after the split on all three sets
+(the rule feeding it is byte-for-byte the same one), which is exactly what the
 split was for — `find` widened, the hint kept its behaviour.
 
-Movement, honestly: pre-v0.2 the NDCGs were A 0.6375, B 0.6317, C 0.5915 and
-recall@5 was A 0.7600 / B 0.7600 / C 0.7200. v0.2 (aliases field) re-ranked
-ties: NDCG A → 0.6486, B → 0.6345, C → 0.5871, recall unchanged. v0.2.1
+Movement, honestly (history — v0.2/v0.3): pre-v0.2 the NDCGs were A 0.6375,
+B 0.6317, C 0.5915 and recall@5 was A 0.7600 / B 0.7600 / C 0.7200. v0.2
+(aliases field) re-ranked ties: NDCG A → 0.6486, B → 0.6345, C → 0.5871,
+recall unchanged. v0.2.1
 (weak pairs out of coverage) changed only what they had been faking: B
 recall@5 0.7600 → **0.7800** and NDCG 0.6345 → **0.6354**, C NDCG 0.5871 →
 **0.5921**, A and all three recalls otherwise unchanged; B's AC3 went **4/10
 → 3/10** (the v0.2 regression #51 `saas-msa-review` is gone), C's stays
 1/10. v0.3 (search/hint split) re-measures recall on the **full** list — see
-the before/after table above.
+the before/after table above; v0.3.1 (confident-first order) then put recall@5
+back to **A 0.7600 / B 0.8400 / C 0.7600** (main table above).
 
 **Hint metrics (`node measure/hint.mjs`, 26.10.2026, identical before and
 after v0.3):**
@@ -558,17 +562,18 @@ positions, so this is the hint's own recall figure — lower than recall@5 by
 construction); `junk` = a block formed on an `empty` query (AC3 for the hint,
 target 0/10).
 
-Set C by kind (product vs baseline recall@5): **easy 0.6000 → 0.6333 vs
-0.6667; hard 0.9000 vs 0.9000**.
+Set C by kind (product vs baseline recall@5): **easy 0.6667 vs 0.6667; hard
+0.9000 vs 0.9000**.
 
 What this means, plainly: the acceptance criterion **AC2** (product ≥ baseline
-recall@5) still holds on the validation set A (0.7200 vs 0.7000) but **fails
-on B and C**; **AC3** — since v0.3 an attribute of the **hint**, «no random
-hints» — is 0/10 on A, **3/10 on B** (#53 `rag-kit`, #56 `copy-editing`, #57
-`landing-page-copy`) and **1/10 on C** (#59 → `windows-powershell-ops`), all
+recall@5) holds on the validation set A (0.7600 vs 0.7000) and **holds on B
+and C (equality: 0.8400 = 0.8400, 0.7600 = 0.7600)**; **AC3** — since v0.3 an
+attribute of the **hint**, «no random hints» — is 0/10 on A, **3/10 on B**
+(#53 `rag-kit`, #56 `copy-editing`, #57 `landing-page-copy`) and **1/10 on C**
+(#59 → `windows-powershell-ops`), all
 three numbers identical to the pre-split run. The `find` output itself now
 deliberately contains non-confident positions: on the 10 `empty` queries of
-each set the top-5 holds a `confident:true` position in **0/10 (A), 2/10 (B),
+each set the top-5 holds a `confident:true` position in **0/10 (A), 3/10 (B),
 1/10 (C)** — that is a property of the full list, not of the hint, and
 `docs/contract.md` says so. One honest history note: right after v0.2 B briefly
 measured 4/10 — #51 `saas-msa-review` passed the gate on the weak pair
@@ -586,13 +591,17 @@ tuned against).
 
 ## Known limitations
 
-- **Lexical search, no semantics**: on the independent acceptance sets the
-  product loses to plain BM25 (B 0.7800 vs 0.8400, C 0.7400 vs 0.7600 even
-  after v0.3 ungated the list), and on the validation set A the full-list
-  recall@5 **fell** 0.7600 → 0.7200 with the gate removed — non-confident
-  matches now crowd the top-5. The coverage rule itself («2 significant
-  words») still gates the **hint**, so a short precise query that overlaps a
-  skill on a single word is **shown by `find` but not hinted**.
+- **Lexical search, no semantics**: recall@5 on the acceptance sets **equals**
+  plain BM25 — B **0.8400 = 0.8400**, C **0.7600 = 0.7600** — while NDCG@10 is
+  **mixed** (above baseline on A and B, below on C — see the main table).
+  Residual junk hints stay at **3/10 (B)** and **1/10 (C)** against a target of
+  0/10. The coverage rule itself («2 significant words») still gates the
+  **hint**, so a short precise query that overlaps a skill on a single word is
+  **shown by `find` but not hinted**.
+- **`dedupeByName` ignores `confident`**: among duplicate skill names the
+  higher-score copy wins. On the 365-skill corpus there are 4 duplicate names
+  and 0 inversions across the measure sets (verified 26.10.2026); recorded as
+  accepted risk.
 - **Residual false positives on everyday requests**: e.g. «Advise running
   shoes for rainy morning runs» → `windows-powershell-ops` (matched through
   «runn»/«run»), set C #59 — confident there, so the hint shows it: junk-rate
