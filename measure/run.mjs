@@ -95,15 +95,21 @@ function addRow(kind, row) {
 for (const q of queries) {
   if ((q.qrels || []).length === 0) {
     // AC3: `empty`-queries must yield nothing useful.
+    // v0.3 (search/hint split): `search()` no longer gates, so `returned`
+    // is the RAW answer of the search path and `confident` says whether any
+    // position would be eligible for a hint. The AC3 criterion «no random
+    // hints» is measured against the HINT in measure/hint.mjs.
     const top = search(productIndex, q.query, { limit: K });
     const nonEmpty = top.length > 0;
     const positive = top.some((r) => Number(r.score) > 0);
+    const confident = top.some((r) => r && r.confident === true);
     ac3.push({
       id: q.id,
       query: q.query,
       returned: nonEmpty,
       positiveScore: positive,
-      top: top.map((r) => ({ name: r.name, score: r.score })),
+      confident,
+      top: top.map((r) => ({ name: r.name, score: r.score, confident: r.confident === true })),
     });
     byKind.empty.n += 1;
     perQuery.push({ id: q.id, kind: q.kind, query: q.query, ac3: { returned: nonEmpty, positive } });
@@ -179,6 +185,7 @@ for (const k of KINDS) kindsOut[k] = { n: byKind[k].n, ...agg(byKind[k]) };
 
 const ac3Returned = ac3.filter((a) => a.returned);
 const ac3Positive = ac3.filter((a) => a.positiveScore);
+const ac3Confident = ac3.filter((a) => a.confident);
 
 const setLabel = SET_PATH.startsWith(HERE + path.sep)
   ? path.relative(HERE, SET_PATH).split(path.sep).join("/")
@@ -198,6 +205,8 @@ const result = {
     returnedNonEmptyIds: ac3Returned.map((a) => a.id),
     positiveScore: ac3Positive.length,
     positiveScoreIds: ac3Positive.map((a) => a.id),
+    confidentNonEmpty: ac3Confident.length,
+    confidentNonEmptyIds: ac3Confident.map((a) => a.id),
     detail: ac3,
   },
   missingQrels: Object.fromEntries(missingQrels),
@@ -235,9 +244,10 @@ if (JSON_OUT) {
   console.log("B = baseline (independent BM25 k=1.2 b=0.7, no MiniSearch)");
   console.log(`eligible = at least one qrel present in the index; product recall@5 >= baseline: ${result.all.product.recall_at_5 >= result.all.baseline.recall_at_5 ? "YES" : "NO"}`);
   console.log("");
-  console.log(`AC3 — empty queries: ${result.ac3.emptyQueries} total, non-empty result: ${result.ac3.returnedNonEmpty} (ids: ${result.ac3.returnedNonEmptyIds.join(", ") || "-"}), score>0: ${result.ac3.positiveScore} (ids: ${result.ac3.positiveScoreIds.join(", ") || "-"})`);
+  console.log(`AC3 — empty queries: ${result.ac3.emptyQueries} total, non-empty result: ${result.ac3.returnedNonEmpty} (ids: ${result.ac3.returnedNonEmptyIds.join(", ") || "-"}), score>0: ${result.ac3.positiveScore} (ids: ${result.ac3.positiveScoreIds.join(", ") || "-"}), confident: ${result.ac3.confidentNonEmpty} (ids: ${result.ac3.confidentNonEmptyIds.join(", ") || "-"})`);
+  console.log("    v0.3: `returned` is the RAW search answer (no gate); the AC3 criterion «no random hints» is measured on the HINT by measure/hint.mjs");
   for (const d of result.ac3.detail) {
-    console.log(`  #${d.id} returned=${d.returned} score>0=${d.positiveScore} top=[${d.top.map((t) => `${t.name}:${t.score.toFixed(3)}`).join(", ")}] — ${d.query}`);
+    console.log(`  #${d.id} returned=${d.returned} score>0=${d.positiveScore} confident=${d.confident} top=[${d.top.map((t) => `${t.name}:${t.score.toFixed(3)}${t.confident ? "*" : ""}`).join(", ")}] — ${d.query}`);
   }
   const mq = Object.entries(result.missingQrels);
   console.log("");

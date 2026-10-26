@@ -1,6 +1,11 @@
-// M5/M6 AC3: the significant-match gate and the relative noise floor,
+// M5/M6 AC3: the significant-match rule and the relative noise floor,
 // exercised through the PRODUCTION search() (core/index.mjs) and through the
-// plugin hint (the plugin shows nothing exactly when search() answers []).
+// plugin hint. v0.3 (owner decision 26.10.2026) split the two consumers:
+// search() returns EVERYTHING it found and marks each position with
+// `confident` (the former ≥ min(2, N) coverage rule), while the plugin hint
+// is built from `confident:true` positions only — so `[]` now means "nothing
+// matched at all / nothing significant could prove anything", and a raw match
+// that does not cover enough shows up as `confident:false`, never as [].
 // M6: the match is TOKEN-level — equality of normalized/stemmed tokens, not a
 // substring of a longer word (bus∌business, next∌next.js), a hyphen splits a
 // word (gsap ⊂ gsap-scrolltrigger), upper-case acronyms are significant.
@@ -8,6 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { defaultRoots, discoverSkills } from "../core/sources.mjs";
 import { buildIndex, search } from "../core/index.mjs";
 import { createContextHook } from "../plugin/hint.mjs";
 
@@ -18,12 +24,16 @@ function skill(name, description) {
   return { name, path: `C:/x/${name}/SKILL.md`, description, bodyHeadings: [] };
 }
 
-test("AC3 gate: a stop-word-only overlap is not a match", () => {
+test("AC3 rule: a stop-word-only overlap is not confident (raw hit kept, flag false)", () => {
   const idx = buildIndex([skill("skill-stops", "на по с в во о об")]);
   // raw MiniSearch DOES match the query — the docs contain на/по/с …
   assert.ok(idx.search("на по с борщ").length >= 1, "raw index must see the stop words");
-  // … but no meaningful query token occurs in the skill text -> empty answer.
-  assert.deepEqual(search(idx, "на по с борщ", { limit: 5 }), []);
+  // … but no meaningful query token occurs in the skill text: v0.3 keeps the
+  // hit in the list (search is no longer gated) and marks it confident:false.
+  const results = search(idx, "на по с борщ", { limit: 5 });
+  assert.equal(results.length, 1, "the raw match must be returned, not dropped");
+  assert.equal(results[0].name, "skill-stops");
+  assert.equal(results[0].confident, false, "stop words + an uncovered token prove nothing");
 });
 
 test("AC3 gate: a query made only of stop words and short tokens returns []", () => {
@@ -49,11 +59,15 @@ test("AC3 gate: case endings match through stemming («договора» vs «�
   assert.equal(results[0].name, "skill-lease");
 });
 
-test("coverage rule: N=3 with one matched token is not enough — the result is cut", () => {
+test("coverage rule: N=3 with one matched token is not confident (position kept)", () => {
   const idx = buildIndex([skill("skill-flowers", "цветы и полив подоконника")]);
   // «цветы» really occurs (token equality holds), but a lone token never
-  // proves the topic: 1 < min(2, 3) → empty answer (M7, no score floor).
-  assert.deepEqual(search(idx, "цветы гонконг фуникулер", { limit: 5 }), []);
+  // proves the topic: 1 < min(2, 3) → confident:false (M7, no score floor).
+  // v0.3: the raw match stays in the output — only the flag says otherwise.
+  const results = search(idx, "цветы гонконг фуникулер", { limit: 5 });
+  assert.equal(results.length, 1, "the raw match must be returned");
+  assert.equal(results[0].name, "skill-flowers");
+  assert.equal(results[0].confident, false);
 });
 
 test("coverage rule: N=3 fully covered, and N=1 covered by its only token — both kept", () => {
@@ -128,24 +142,37 @@ test("M7 coverage N=0: only service words → nothing can prove a match → []",
   assert.deepEqual(search(idx, "the of and for with is", { limit: 5 }), [], "M5 short list still holds");
 });
 
-test("M7 coverage N=2: one shared token is cut, two matched tokens are kept", () => {
+test("M7 coverage N=2: one shared token is not confident, two matched tokens are", () => {
   const one = buildIndex([skill("skill-office", "office supplies catalog")]);
-  assert.deepEqual(search(one, "office coffee", { limit: 5 }), [], "1 of 2 meaningful tokens proves nothing");
+  const partial = search(one, "office coffee", { limit: 5 });
+  assert.equal(partial.length, 1, "1 of 2 meaningful tokens is still returned (v0.3)");
+  assert.equal(partial[0].confident, false, "1 of 2 meaningful tokens proves nothing");
   const both = buildIndex([skill("skill-coffee", "office coffee machine")]);
-  assert.equal(search(both, "office coffee", { limit: 5 }).length, 1, "2 of 2 = minimal proof");
+  const full = search(both, "office coffee", { limit: 5 });
+  assert.equal(full.length, 1, "2 of 2 = minimal proof");
+  assert.equal(full[0].confident, true);
 });
 
-test("M7 coverage: «office» alone does not answer a 3-token query (AC3 #59 shape)", () => {
+test("M7 coverage: «office» alone is not confident for a 3-token query (AC3 #59 shape)", () => {
   const idx = buildIndex([
     skill("skill-supplies", "office supplies restocking"),
     skill("skill-beans", "office coffee brewing"),
   ]);
-  // «office coffee» is covered by skill-beans only; the single-«office» skill
-  // is cut, and skill-supplies never proves «coffee»/«buy».
+  // «office coffee» is covered by skill-beans only; skill-supplies holds
+  // «office» alone and can never prove «coffee»/«buy».
   const results = search(idx, "What coffee should I buy for the office", { limit: 5 });
-  assert.deepEqual(results.map((r) => r.name), ["skill-beans"], "only the covered skill survives");
-  // the same query with «office» as its ONLY meaningful token still works
-  assert.equal(search(idx, "office", { limit: 5 }).length, 2, "N=1 needs just its one token (both hold it)");
+  assert.deepEqual(
+    results.map((r) => [r.name, r.confident]),
+    [["skill-beans", true], ["skill-supplies", false]],
+    "both raw matches are returned; only the covered one is confident",
+  );
+  // the same query with «office» as its ONLY meaningful token is confident
+  // for both (N=1 needs just its one token)
+  assert.deepEqual(
+    search(idx, "office", { limit: 5 }).map((r) => r.confident),
+    [true, true],
+    "N=1 needs just its one token (both hold it)",
+  );
 });
 
 test("M7 coverage N=5: regression «договор аренды офис депозит продление»", () => {
@@ -153,28 +180,29 @@ test("M7 coverage N=5: regression «договор аренды офис деп�
     skill("skill-lease", "договор аренды офиса: депозит и продление"),
     skill("skill-unrelated", "совсем другой текст про котов"),
   ]);
-  assert.equal(
-    search(good, "договор аренды офис депозит продление", { limit: 5 })[0]?.name,
-    "skill-lease",
-    "the real answer must pass the coverage rule",
-  );
+  const kept = search(good, "договор аренды офис депозит продление", { limit: 5 });
+  assert.equal(kept[0]?.name, "skill-lease", "the real answer must lead the list");
+  assert.equal(kept[0]?.confident, true, "and it must be confident (5 of 5 covered)");
   const weak = buildIndex([skill("skill-contract", "договор только про котов")]);
-  assert.deepEqual(
-    search(weak, "договор аренды офис депозит продление", { limit: 5 }),
-    [],
-    "1 of 5 meaningful tokens is not coverage",
-  );
+  const partial = search(weak, "договор аренды офис депозит продление", { limit: 5 });
+  assert.equal(partial.length, 1, "the raw match is returned (v0.3)");
+  assert.equal(partial[0].confident, false, "1 of 5 meaningful tokens is not coverage");
 });
 
-test("M7 coverage: the AC3 junk queries lose their service-word tokens", () => {
+test("M7 coverage: the AC3 junk queries keep their raw hits but prove nothing", () => {
   const idx = buildIndex([
     skill("skill-when", "guidance for when the build breaks"), // «when» only
     skill("skill-next", "the next release checklist"), // «next» only
   ]);
-  // #58: significant tokens are bus/airport — absent from every skill text.
-  assert.deepEqual(search(idx, "When is the next bus to the airport", { limit: 5 }), []);
-  // #59: «should»/«what» are service words; «office» alone covers nothing here.
-  assert.deepEqual(search(idx, "What coffee should I buy for the office", { limit: 5 }), []);
+  // #58: significant tokens are bus/airport — absent from every skill text, so
+  // the service-word hits (when/next/the) are returned but confident:false.
+  const fiftyEight = search(idx, "When is the next bus to the airport", { limit: 5 });
+  assert.equal(fiftyEight.length, 2, "raw matches survive (v0.3)");
+  assert.ok(fiftyEight.every((r) => r.confident === false), "nothing can prove bus/airport");
+  // #59: «should»/«what» are service words; neither skill holds coffee/buy/office.
+  const fiftyNine = search(idx, "What coffee should I buy for the office", { limit: 5 });
+  assert.equal(fiftyNine.length, 2, "raw matches survive (v0.3)");
+  assert.ok(fiftyNine.every((r) => r.confident === false), "a service-word overlap proves nothing");
 });
 
 test("M7: scores rank the list, they never validate it (no MIN_STRENGTH left)", () => {
@@ -217,4 +245,58 @@ test("plugin: meaningful match still produces exactly one block", () => {
   createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
   assert.equal(ev.system.length, 2, "one block appended");
   assert.ok(ev.system[1].text.includes("skill-delta"));
+});
+
+// ── v0.3: search and hint are split (owner decision 26.10.2026) ─────────────
+
+const FIX_INDEX = buildIndex(discoverSkills([FIX_ROOT]).skills);
+
+test("v0.3: search returns raw hits with confident:false instead of []", () => {
+  // «banana zebra» (N=2): skill-beta holds only «banana», delta/omega only
+  // «zebra» — nobody covers both, so nothing is confident, but v0.3 still
+  // returns all three positions (search is no longer gated).
+  const results = search(FIX_INDEX, "banana zebra", { limit: 10 });
+  assert.deepEqual(
+    results.map((r) => [r.name, r.confident]),
+    [
+      ["skill-beta", false],
+      ["skill-delta", false],
+      ["skill-omega", false],
+    ],
+  );
+});
+
+test("v0.3: the hint shows nothing when every hit is confident:false", () => {
+  const ev = makeEvent("banana zebra");
+  createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
+  assert.equal(ev.system.length, 1, "raw hits exist, but no confident position -> no block");
+});
+
+test("v0.3: empty/punctuation query -> [] from search and no hint block", () => {
+  assert.deepEqual(search(FIX_INDEX, ""), []);
+  assert.deepEqual(search(FIX_INDEX, "   "), []);
+  assert.deepEqual(search(FIX_INDEX, "!!! ... ---"), []);
+  const ev = makeEvent("!!! ... ---");
+  createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
+  assert.equal(ev.system.length, 1, "no letters -> no hint");
+});
+
+test("v0.3: hint on «проверь договор поставки» contains supply-contract-review", (t) => {
+  const { skills } = discoverSkills(defaultRoots());
+  if (!skills.some((s) => s.name === "supply-contract-review")) {
+    t.skip("supply-contract-review not in the default roots on this host");
+    return;
+  }
+  const hook = createContextHook({ env: {}, debug: false });
+  // the first call of a fresh hook pays the index build (~400 ms on this
+  // install) and is dropped by the 150 ms guard (documented behaviour);
+  // the measured call runs against the built index, like the next dispatch.
+  hook(makeEvent("warm-up: index build, not asserted"));
+  const ev = makeEvent("проверь договор поставки");
+  hook(ev);
+  assert.equal(ev.system.length, 2, "confident match -> exactly one block");
+  assert.ok(
+    ev.system[1].text.includes("supply-contract-review"),
+    `block must name supply-contract-review: ${ev.system[1].text}`,
+  );
 });

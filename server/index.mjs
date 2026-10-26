@@ -59,7 +59,7 @@ const TOOLS = [
   {
     name: "find",
     description:
-      "Local full-text search over SKILL.md files (BM25 over name, description and headings). Read-only. Returns {ok, items:[{name,path,score,why}]}.",
+      "Local full-text search over SKILL.md files (BM25 over name, description and headings). Read-only. Returns {ok, items:[{name,path,score,why,confident}]} — the full result list; confident marks positions that cover >= min(2, N) significant query tokens (the hint shows confident:true only).",
     inputSchema: {
       type: "object",
       properties: {
@@ -221,8 +221,16 @@ function toolFind(args) {
   if (args.query === "") return { ok: true, items: [], note: "пустой запрос" };
 
   const st = getIndex(); // may throw UnavailableError
+  // v0.3 (owner decision 26.10.2026): `find` returns EVERYTHING the index
+  // found, each position carrying `confident`. The coverage rule no longer
+  // filters this list — it only decides the `note` (and the plugin hint, which
+  // reads confident:true only). AC3 «no random hints» binds the HINT, not the
+  // full `find` output (docs/contract.md).
   const items = search(st.index, args.query, { limit, restrict_to: restrictTo });
   if (items.length === 0) return { ok: true, items: [], note: "ничего не найдено" };
+  if (!items.some((it) => it && it.confident === true)) {
+    return { ok: true, items, note: "уверенных совпадений нет" };
+  }
   return { ok: true, items };
 }
 

@@ -168,3 +168,30 @@ test("selectWinner: without scores the lexicographically first path wins; empty 
   assert.equal(selectWinner(null), null);
   assert.equal(selectWinner(undefined), null);
 });
+
+// ── v0.3: the result list is not gated any more, `confident` marks the rule ─
+
+test("v0.3: every returned position carries a boolean confident flag", () => {
+  const results = search(index, "zebra", { limit: 5 });
+  assert.ok(results.length >= 1);
+  for (const r of results) assert.equal(typeof r.confident, "boolean", `${r.name}: no confident flag`);
+});
+
+test("v0.3: a raw match covering too little is returned with confident:false", () => {
+  const idx = buildIndex([
+    { name: "skill-one", path: "C:/x/skill-one/SKILL.md", description: "zebra handbook only", bodyHeadings: [] },
+  ]);
+  const results = search(idx, "zebra quokka", { limit: 5 }); // N = 2, one token matched
+  assert.equal(results.length, 1, "the raw match must be returned (search is not gated)");
+  assert.equal(results[0].name, "skill-one");
+  assert.equal(results[0].confident, false, "1 of 2 significant tokens proves nothing");
+});
+
+test("v0.3: a fully covered match is confident", () => {
+  const idx = buildIndex([
+    { name: "skill-two", path: "C:/x/skill-two/SKILL.md", description: "zebra quokka handbook", bodyHeadings: [] },
+  ]);
+  const results = search(idx, "zebra quokka", { limit: 5 });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].confident, true, "2 of 2 significant tokens");
+});

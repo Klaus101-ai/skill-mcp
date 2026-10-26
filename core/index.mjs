@@ -126,10 +126,13 @@ function buildAliases(text) {
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
-// --- coverage rule (M7; replaces the M5/M6 score floor) ---------------------
-// A result is valid only when it COVERS enough of the query's meaningful
-// tokens: the number of matched significant tokens (token equality after the
-// shared normalization/stemming pipeline) must be >= min(MIN_COVERAGE, N),
+// --- coverage rule → the `confident` flag (M7 rule, v0.3 split) --------------
+// v0.3 (owner decision 26.10.2026): SEARCH and HINT no longer share one gate.
+// `search()` returns EVERYTHING MiniSearch found and marks each position with
+// `confident: boolean` instead of dropping the rest:
+//
+//   confident = (number of matched significant tokens) >= min(MIN_COVERAGE, N)
+//
 // where N = the number of significant query tokens. A token counts as matched
 // only when it occurs in the document's `cover` vocabulary (v0.2.1): the
 // document's own name/description/headings tokens + its STRONG bilingual
@@ -137,9 +140,14 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 // rank, but never prove a topic on their own — the whole point of an
 // ambiguous pair («письмо»↔`letter`) is that it is shared with unrelated
 // skills.
-// The same single rule serves the MCP `find` and the plugin hint (both call
-// search()); when no result covers enough, the answer is [] and the MCP tool
-// answers {ok:true, items:[], note:"ничего не найдено"}.
+//
+// Consumers: the MCP `find` returns the full list with `confident` per item
+// and only reports note "ничего не найдено" when the list itself is empty
+// (note "уверенных совпадений нет" when it is all `confident:false`); the
+// plugin hint (plugin/hint.mjs) builds its block from `confident:true`
+// positions only. AC3 ("no random hints") therefore constrains the HINT, not
+// the full `find` output — the AC3 rationale lives with the consumer that
+// shows a position to the model.
 //
 // Why 2 (rationale in README.md § AC3, "why two tokens"): one lone matched
 // word is never proof of the topic — it is exactly how the junk queries got
@@ -147,11 +155,12 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 // are the minimal sign that a skill really talks about the request. Queries
 // made of 1–2 meaningful tokens are proven by one of them (min(2, N)), so a
 // short, precise query is never over-tightened. N = 0 (only stop words and
-// short/acronym-less tokens) can be proven by nothing at all → [].
+// short/acronym-less tokens) can be proven by nothing at all — such a query
+// never reaches MiniSearch (`significantQueryTokens` is empty → []).
 //
-// There is deliberately NO score threshold left: scores still RANK the list,
-// they no longer VALIDATE it, so nothing is derived from a measured gap on
-// set A and no number has to be re-derived when the corpus changes.
+// There is deliberately NO score threshold: scores still RANK the list, they
+// never VALIDATE it, so nothing is derived from a measured gap on set A and
+// no number has to be re-derived when the corpus changes.
 const MIN_COVERAGE = 2;
 
 function significantTerms(terms) {
@@ -320,27 +329,28 @@ export function selectWinner(candidates) {
 }
 
 /**
- * Search the index. Returns [{name, path, score, why}] ordered by score
- * descending (ties broken deterministically by name, then path), with
- * duplicate skill names collapsed to their best-scoring entry.
- * Empty / whitespace-only / punctuation-only queries return [].
+ * Search the index. Returns [{name, path, score, why, confident}] ordered by
+ * score descending (ties broken deterministically by name, then path), with
+ * duplicate skill names collapsed to their best-scoring entry. Empty /
+ * whitespace-only / punctuation-only queries return [].
  *
- * AC3 coverage gate (M5 gate, M6 token-level match, M7 coverage rule,
- * v0.2.1 weak pairs): the query first yields its meaningful tokens
- * (>= 3 chars or a whitelisted upper-case acronym, not stop words,
- * normalized + stemmed — core/text.mjs). If there are none, the answer is [].
- * Otherwise a result document is kept only when its `cover` vocabulary holds
- * at least `min(MIN_COVERAGE, N)` of those tokens by EQUALITY (same
- * normalization/stemming — never a substring of a longer word; a dot keeps
- * words together, a hyphen splits them). `cover` is built at index time from
- * name/description/headings plus the document's STRONG dictionary aliases;
- * weak aliases (lexicon `_weak`) rank but never cover — MiniSearch's
- * `r.match` alone would count them, so it is no longer the gate's source.
- * Scores rank the surviving list but never validate it — there is no score
- * threshold (M7 removed MIN_STRENGTH together with corpusCeiling). This one
- * rule is the whole AC3 story for every consumer: the MCP `find`
- * (note "ничего не найдено") and the plugin hint (no block) both simply call
- * `search()` and show nothing on [].
+ * v0.3 (owner decision 26.10.2026 — search split from the hint): the result
+ * list is NOT gated any more. Every document MiniSearch finds is returned;
+ * each position carries `confident: boolean`, computed by the former AC3
+ * coverage rule (M5–M7): the number of matched significant tokens — token
+ * EQUALITY after the shared normalization/stemming pipeline — must be
+ * >= min(MIN_COVERAGE, N), where N = the number of significant query tokens
+ * of the query (>= 3 chars or a whitelisted upper-case acronym, not stop
+ * words, normalized + stemmed — core/text.mjs). A token is matched only when
+ * it occurs in the document's `cover` vocabulary (name/description/headings
+ * own tokens + STRONG bilingual aliases; weak aliases rank but never cover).
+ *
+ * When there are no significant tokens at all (N = 0), nothing could prove a
+ * match and the answer is still [] — that check is upstream of MiniSearch.
+ *
+ * Consumers split accordingly: the MCP `find` returns the full list (note
+ * rules live in server/index.mjs), the plugin hint builds its block from
+ * `confident:true` positions only (plugin/hint.mjs).
  *
  * `boost` optionally overrides the field weights (used by measure/weights.mjs
  * to compare weight candidates on the A set without editing this file).
@@ -360,27 +370,27 @@ export function search(index, query, { limit = 5, restrict_to: restrictTo, boost
   }
 
   const matched = index.search(q, options);
-  // Coverage rule (M7, v0.2.1): a result is valid only if at least
-  // min(2, N) of the query's meaningful tokens occur in its `cover`
-  // vocabulary (own text + STRONG aliases) by token equality after stemming.
-  // One shared token proves nothing; a 1–2-token query needs one. Weak
-  // aliases never count here; a document stored without `cover` (not built
-  // by buildIndex) keeps the pre-v0.2.1 r.match behaviour.
+  // Confidence (M7 rule, no longer a filter — v0.3): a position is confident
+  // if at least min(2, N) of the query's meaningful tokens occur in its
+  // `cover` vocabulary (own text + STRONG aliases) by token equality after
+  // stemming. One shared token proves nothing; a 1–2-token query needs one.
+  // Weak aliases never count; a document stored without `cover` (not built
+  // by buildIndex) falls back to MiniSearch's r.match terms.
   const need = Math.min(MIN_COVERAGE, sig.length);
-  const gated = matched.filter((r) => {
+  const withConfidence = matched.map((r) => {
     const cover = Array.isArray(r.cover) ? new Set(r.cover) : null;
     const match = r.match || null;
-    if (!cover && !match) return false;
+    if (!cover && !match) return { result: r, confident: false };
     let count = 0;
     for (const t of sig) {
       const hit = cover ? cover.has(t) : hasOwn(match, t);
       if (hit) count += 1;
-      if (count >= need) return true; // enough coverage, no need to scan on
+      if (count >= need) return { result: r, confident: true }; // enough coverage
     }
-    return false;
+    return { result: r, confident: false };
   });
-  gated.sort(compareResults);
-  const unique = dedupeByName(gated);
+  withConfidence.sort((a, b) => compareResults(a.result, b.result));
+  const unique = dedupeByName(withConfidence.map((e) => ({ ...e.result, confident: e.confident })));
 
   const capped = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), unique.length) : unique.length;
 
@@ -389,5 +399,6 @@ export function search(index, query, { limit = 5, restrict_to: restrictTo, boost
     path: r.path,
     score: r.score,
     why: buildWhy(r),
+    confident: r.confident === true,
   }));
 }

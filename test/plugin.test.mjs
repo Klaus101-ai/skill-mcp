@@ -306,3 +306,24 @@ test("malformed config file → defaults + debug line, hint still works", () => 
     fs.rmSync(tmp, { force: true });
   }
 });
+
+// ── v0.3: подсказка строится только из confident:true ───────────────────────
+
+test("v0.3: only confident positions enter the block (mixed pool)", () => {
+  // «banana split zebra» (N=3): skill-beta covers banana+split (confident),
+  // delta/omega cover «zebra» alone (not confident) — the block must contain
+  // beta only, even though all three are in the raw result list.
+  const ev = makeEvent("banana split zebra");
+  newHook()(ev);
+  assert.equal(ev.system.length, 2, "a confident candidate exists → the block forms");
+  assert.deepEqual(entryNames(ev.system[1].text), ["skill-beta"]);
+  assert.ok(!ev.system[1].text.includes("skill-delta"), "a non-confident position must never be hinted");
+  assert.ok(!ev.system[1].text.includes("skill-omega"), "a non-confident position must never be hinted");
+});
+
+test("v0.3: raw hits but no confident position → no block", () => {
+  const ev = makeEvent("banana zebra");
+  const before = structuredClone(ev.system);
+  newHook()(ev);
+  assert.deepEqual(ev.system, before, "search finds something, the hint still stays silent");
+});

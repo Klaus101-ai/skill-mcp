@@ -6,7 +6,7 @@ queries with a ranked list of matching skills. Everything runs locally:
 **no network, no LLM, no embeddings, no API keys, files are read-only.**
 
 Status: **M1–M7 complete, the M9 attempt reverted, final acceptance sets
-A / B / C measured.**
+A / B / C measured, v0.3 split search from the hint.**
 
 - **M1–M4**: core index and ranking (`core/`), CLI smoke run, baseline
   evaluation, the **MCP server** (`server/`, stdio: `find` / `outline` /
@@ -21,10 +21,17 @@ A / B / C measured.**
 - **M9** (informative-token coverage and typo tolerance) was tried and
   **reverted** (`Revert M9`, `d1edd63`): it made recall worse, so HEAD runs
   the M7/M8 behaviour again.
+- **v0.3** (owner decision 26.10.2026): **search and hint are split.**
+  `search()` / the MCP `find` no longer filter the list with the coverage
+  rule — they return everything the index found, each position flagged
+  `confident`; the plugin hint is built from `confident:true` positions only.
+  Recall is therefore measured on the **full** list (Evaluation updated), and
+  AC3 «no random hints» binds the **hint** (measured by `measure/hint.mjs`),
+  not the full `find` output — see **Search vs hint** and `docs/contract.md`.
 - Final acceptance sets **A / B / C** are measured; the acceptance verdict is
-  mixed — two of the eight acceptance criteria fail (`AC2`, `AC3` on sets B
-  and C). See **Evaluation**, **Known limitations** and the reproduction
-  commands in **Verification**.
+  mixed — two of the eight acceptance criteria fail (`AC2` on B and C, `AC3`
+  for the hint on B and C). See **Evaluation**, **Known limitations** and the
+  reproduction commands in **Verification**.
 
 This is an early release (**v0.1**) with the limitations listed below — read
 them before relying on it.
@@ -120,6 +127,7 @@ or malformed config falls back to the defaults (fail-open).
 npm test        # unit tests (node:test), including the spawned MCP server
 npm run smoke   # build the index over the real skill roots, run 5 fixed queries
 npm run measure # held-out metrics: product vs baseline recall@5 / NDCG@10 (measure/heldout.jsonl)
+node measure/hint.mjs   # hint metrics: formed / hit@2 / junk on empty (sets A, B, C)
 npm run latency # hint-formation latency p50/p95/max along the plugin path
 npm run measure:baseline # standalone baseline BM25 recall@5 on the draft set
 npm run server  # start the MCP server on stdio
@@ -135,7 +143,7 @@ import { buildIndex, search, selectWinner } from "./core/index.mjs";
 const { skills, skipped } = discoverSkills(defaultRoots());
 const index = buildIndex(skills);
 const hits = search(index, "bug bounty report", { limit: 5 });
-// -> [{ name, path, score, why }, ...]
+// -> [{ name, path, score, why, confident }, ...]  (v0.3: the full list; `confident` marks the ≥min(2, N) coverage rule)
 ```
 
 - Field weights: `name` x3, `description` x2, `headings` x1 (re-confirmed as
@@ -148,8 +156,8 @@ const hits = search(index, "bug bounty report", { limit: 5 });
   `next.js` is ONE word (the query `next` does **not** match it), while a
   hyphen splits words: `gsap` matches `gsap-scrolltrigger`, and
   `AI-документ` yields the two tokens `AI` + `документ`.
-- **AC3 coverage rule (M7; replaces the M5/M6 score floor)**: a result is
-  valid only when it **covers enough of the query's meaningful tokens** —
+- **Coverage rule → `confident` flag (M7 rule; v0.3 split)**: a position is
+  **confident** when it **covers enough of the query's meaningful tokens** —
   at least `min(2, N)` of them, `N` = the number of meaningful query tokens.
   A token is meaningful when it is ≥3 chars or an **upper-case whitelisted
   acronym** (`AI`, `ML`, `UI`, `UX`, `QA`, `PR`, `HR`, `IT`, `CI`, `CD`,
@@ -159,21 +167,29 @@ const hits = search(index, "bug bounty report", { limit: 5 });
   full list in `core/text.mjs`; subject words such as *review, check, audit,
   policy, contract, договор, проверь, аудит, политика* are never stop words).
   The count uses **token equality** after stemming — never a substring of a
-  longer word. When nothing covers enough, `search()` returns `[]`: the MCP
-  `find` answers `note: "ничего не найдено"` and the plugin simply shows no
-  block — **the same one rule for `find` and for the hint**.
+  longer word. **v0.3 (owner decision 26.10.2026): the rule no longer filters
+  the list.** `search()` / `find` return everything the index found, each
+  position carrying `confident: true|false`; the MCP `find` only attaches
+  `note` («ничего не найдено» on an empty list, «уверенных совпадений нет»
+  when every position is `confident:false`), and the plugin hint builds its
+  block from `confident:true` positions only — no confident position means no
+  block. See **Search vs hint** below.
   **Why two tokens:** a single shared word is not proof of the topic — that is
   exactly how junk queries used to get answers (one «office», one «when»);
   two matched tokens are the minimal sign that a skill really talks about the
   request. For a short query of 1–2 meaningful tokens one of them already
-  counts (`min(2, N)`), so a precise one-word query stays answerable; `N = 0`
-  (service words only) can be proven by nothing at all.
+  counts (`min(2, N)`), so a precise one-word query stays confident; `N = 0`
+  (service words only) can be proven by nothing at all and never reaches
+  MiniSearch (`search()` answers `[]`). The rule is what keeps the **hint**
+  quiet on junk — it is no longer what empties the **search** output.
   **No score threshold remains** (M7 deleted `MIN_STRENGTH` together with
-  `corpusCeiling`): scores still *rank* the surviving list, they no longer
-  *validate* it, so nothing is derived from a measured gap on set A and no
-  number has to be re-derived when the corpus changes. Measured effect on set
-  A: AC3 2/10 → 0/10 non-empty, hard recall@5 0.6000 → 0.7333, no query lost
-  its answer ([`measure/README.md`](measure/README.md) § M7).
+  `corpusCeiling`): scores still *rank* the list, they no longer *validate*
+  it, so nothing is derived from a measured gap on set A and no number has to
+  be re-derived when the corpus changes. Historical effect of the M7 rule on
+  set A (when it still gated the list): AC3 2/10 → 0/10 non-empty, hard
+  recall@5 0.6000 → 0.7333, no query lost its answer
+  ([`measure/README.md`](measure/README.md) § M7); v0.3 un-gates the search
+  and re-measures — see **Evaluation**.
 - Duplicate skill names (the same skill installed in several roots) collapse
   to the best-scoring entry; backup directories (`_backup`, `_backups`,
   `.backup`, `backup`) are never indexed.
@@ -183,9 +199,10 @@ const hits = search(index, "bug bounty report", { limit: 5 });
   field is credited only when it really contains an equal token — a substring
   does not count (`Officer` never proves `office`).
 - `restrict_to: ["name-or-glob*"]` filters results to an allowlist of skill names.
-- Empty / whitespace / punctuation-only queries — and queries that no skill
-  text covers well enough under the coverage rule — return `[]`: no random
-  hints.
+- Empty / whitespace / punctuation-only queries — and queries with no
+  meaningful token at all (service words only) — return `[]`. Every other
+  query returns the full ranked list with `confident` per position; «no
+  random hints» is upheld by the hint itself (v0.3), see **Search vs hint**.
 - `skipped` lists `SKILL.md` symlinks whose real path escapes their root
   (`reason: "outside-root"`); `selectWinner` applies the shared
   "highest score, then lexicographically first path" rule.
@@ -229,11 +246,12 @@ Restart opencode afterwards — config is loaded once at startup.
 // -> {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"find",...},{"name":"outline",...},{"name":"read-section",...}]}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
 
-// find (limit 1-10, default 5)
+// find (limit 1-10, default 5) — v0.3: the FULL list, `confident` per item
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"find","arguments":{"query":"bug bounty report","limit":3}}}
-// -> result.content[0].text = {"ok":true,"items":[{"name":"bugbounty","path":"...","score":116.1,"why":"matched name+description: bug, bounty"}]}
-// empty query -> {"ok":true,"items":[],"note":"пустой запрос"}
-// no hits     -> {"ok":true,"items":[],"note":"ничего не найдено"}
+// -> result.content[0].text = {"ok":true,"items":[{"name":"bugbounty","path":"...","score":116.1,"why":"matched name+description: bug, bounty","confident":true}]}
+// empty query    -> {"ok":true,"items":[],"note":"пустой запрос"}
+// no hits at all -> {"ok":true,"items":[],"note":"ничего не найдено"}
+// hits, none confident -> {"ok":true,"items":[{...,"confident":false}],"note":"уверенных совпадений нет"}
 
 // outline: name OR path
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"outline","arguments":{"name":"bugbounty"}}}
@@ -273,6 +291,13 @@ skill suggestions:
 
 Messages, history, tools and options are never modified — only that one
 `system` part is appended (and at most once per request).
+
+**Only `confident:true` positions are hinted (v0.3).** The search behind the
+block returns the full result list, and the hook drops every `confident:false`
+position before it fills the two slots: a query whose matches do not cover
+enough meaningful tokens gets **no block at all**, exactly as an empty result.
+This is where AC3 («no random hints») lives — the MCP `find` deliberately
+shows the whole list with the flag (see **Search vs hint**).
 
 What it does **not** do, by contract:
 
@@ -394,9 +419,9 @@ like «тесты» used to reach only the Russian-described skills. v0.2 adds a
   English-described skill and an English query finds a Russian-described one.
 - **Same pipeline as everything else**: `aliases` is tokenized, normalized
   and stemmed by the same `core/text.mjs` functions as every other field, so
-  «тесты» matches the alias `test` through stemming, and the AC3 coverage
-  gate applies to alias matches like any other token — except the weak pairs
-  below (v0.2.1).
+  «тесты» matches the alias `test` through stemming, and the coverage rule
+  behind `confident` applies to alias matches like any other token — except
+  the weak pairs below (v0.2.1).
 
 **Weak pairs (v0.2.1).** Seven pairs are flagged in the `"_weak"` list of the
 same file: `письмо↔letter`, `возврат↔return`, `подписка↔subscription`,
@@ -435,6 +460,38 @@ recall@5 **0.7600 → 0.7800** (B #40 turned into a hit), C NDCG@10 **0.5871 →
 0.5921** and on C #46 `domain-dispute` is back at top-1 (the previously
 top-ranked `dsar-response` lost its weak-alias coverage); set A unchanged.
 
+## Search vs hint
+
+Since **v0.3** (owner decision 26.10.2026 — *«разделить поиск и подсказку»*)
+the two consumers of the index no longer share one gate:
+
+| | MCP `find` / `search()` | plugin hint |
+|---|---|---|
+| what it returns | **the full ranked list** the index found | **at most 2 positions**, `confident:true` only |
+| confidence | each item carries `confident: true\|false` (the `≥ min(2, N)` coverage rule) | `confident:false` positions are dropped before the two slots are filled |
+| nothing confident | items still returned + `note: "уверенных совпадений нет"` | **no block** (same as an empty result) |
+| nothing found | `items: []` + `note: "ничего не найдено"` (empty query: `note: "пустой запрос"`) | no block |
+| AC3 «no random hints» | **not applicable** — a flag, not a filter | **binding** — this is where AC3 lives |
+
+Why: one shared gate did two incompatible jobs. It made `find` lose short
+precise queries (a real skill overlapping on one word was simply not there),
+and it was the only thing standing between a junk request and the model's
+context. Splitting them keeps both properties where they belong — the search
+shows what exists (with the confidence flag), the hint stays silent unless a
+skill actually **proves** the request.
+
+- **Pool**: the hint searches with the same `limit: 10` candidate pool and
+  then keeps only `confident:true` entries; budgets (≤2 positions, ≤1000
+  chars, ≤150 ms), fail-open, R1–R4 and deny/allow are unchanged.
+- **Measurement**: search metrics stay in `measure/run.mjs` (recall@5 / NDCG
+  on the full list); the hint has its own harness `measure/hint.mjs`
+  (formed-rate, top-2 hit-rate on easy/hard, junk-rate on `empty`, sets
+  A/B/C, `--json`).
+- **Measured effect of the split** (26.10.2026): the hint itself is
+  **unchanged** — formed/hit/junk are identical before and after on all three
+  sets (the rule feeding it is the same); what changed is the `find` output
+  (now complete) and, with it, recall on the full list (table below).
+
 ## Evaluation
 
 Full methodology, per-set tables and history: [`measure/README.md`](measure/README.md).
@@ -442,14 +499,35 @@ The product contract (R1–R6, hint block, tool contracts, safety guarantees):
 [`docs/contract.md`](docs/contract.md).
 
 Three fixed sets, each written independently before any run on it (60 queries
-each, 365 skills in the index); numbers are **as measured** on 26.10.2026, not
-rounded or adjusted:
+each, 365 skills in the index); numbers are **as measured** on 26.10.2026 after
+**v0.3**, not rounded or adjusted:
 
-| set | role | product recall@5 | baseline recall@5 | product NDCG@10 | baseline NDCG@10 | AC3 (junk → empty) |
+| set | role | product recall@5 | baseline recall@5 | product NDCG@10 | baseline NDCG@10 | hint junk (`empty`, target 0/10) |
 |---|---|---|---|---|---|---|
-| A (`measure/heldout.jsonl`) | validation | 0.7600 | 0.7000 | 0.6486 | 0.6368 | 0/10 |
-| B (`measure/heldout-b.jsonl`) | acceptance | 0.7800 | 0.8400 | 0.6354 | 0.6624 | 3/10 |
-| C (`measure/heldout-c.jsonl`) | acceptance (final) | 0.7200 | 0.7600 | 0.5921 | 0.6654 | 1/10 |
+| A (`measure/heldout.jsonl`) | validation | 0.7200 | 0.7000 | 0.6305 | 0.6368 | 0/10 |
+| B (`measure/heldout-b.jsonl`) | acceptance | 0.7800 | 0.8400 | 0.6541 | 0.6624 | 3/10 |
+| C (`measure/heldout-c.jsonl`) | acceptance (final) | 0.7400 | 0.7600 | 0.5974 | 0.6654 | 1/10 |
+
+**v0.3 before/after (same sets, same commands, 26.10.2026).** Recall@5 is now
+computed on the **full** list (no gate), the AC3 column is the **hint's**
+junk-rate from `measure/hint.mjs`:
+
+| set | recall@5 before → after | NDCG@10 before → after | hint junk before → after |
+|---|---|---|---|
+| A | 0.7600 → **0.7200** | 0.6486 → **0.6305** | 0/10 → 0/10 |
+| B | 0.7800 → **0.7800** | 0.6354 → **0.6541** | 3/10 → 3/10 |
+| C | 0.7200 → **0.7400** | 0.5921 → **0.5974** | 1/10 → 1/10 |
+
+Honest reading: the split **helped C** (0.7200 → 0.7400) and left B's recall
+unchanged while its NDCG rose; on the validation set A the full-list recall
+**fell** 0.7600 → 0.7200 (easy stayed 0.7714, hard 0.7333 → 0.6000) — with no
+gate left to clear the top-5, non-confident high-scoring matches now occupy
+slots that used to be cleaned before scoring. The expected «≥ baseline on at
+least one of B/C» did **not** happen: B is 0.7800 vs 0.8400, C is 0.7400 vs
+0.7600 — both still below baseline, as reported. The **hint did not move at
+all**: formed/hit/junk are identical before and after on all three sets (the
+rule feeding it is byte-for-byte the same one), which is exactly what the
+split was for — `find` widened, the hint kept its behaviour.
 
 Movement, honestly: pre-v0.2 the NDCGs were A 0.6375, B 0.6317, C 0.5915 and
 recall@5 was A 0.7600 / B 0.7600 / C 0.7200. v0.2 (aliases field) re-ranked
@@ -458,16 +536,37 @@ ties: NDCG A → 0.6486, B → 0.6345, C → 0.5871, recall unchanged. v0.2.1
 recall@5 0.7600 → **0.7800** and NDCG 0.6345 → **0.6354**, C NDCG 0.5871 →
 **0.5921**, A and all three recalls otherwise unchanged; B's AC3 went **4/10
 → 3/10** (the v0.2 regression #51 `saas-msa-review` is gone), C's stays
-1/10.
+1/10. v0.3 (search/hint split) re-measures recall on the **full** list — see
+the before/after table above.
 
-Set C by kind (product vs baseline recall@5): **easy 0.6000 vs 0.6667;
-hard 0.9000 vs 0.9000**.
+**Hint metrics (`node measure/hint.mjs`, 26.10.2026, identical before and
+after v0.3):**
+
+| set | easy formed | easy hit@2 | hard formed | hard hit@2 | junk on `empty` |
+|---|---|---|---|---|---|
+| A | 34/35 (97.1%) | 26/35 = 0.7429 | 15/15 (100%) | 9/15 = 0.6000 | **0/10** |
+| B | 27/30 (90.0%) | 22/30 = 0.7333 | 20/20 (100%) | 14/20 = 0.7000 | **3/10** |
+| C | 29/30 (96.7%) | 16/30 = 0.5333 | 20/20 (100%) | 17/20 = 0.8500 | **1/10** |
+
+`formed` = a `<skill_hint>` block was appended for that query; `hit@2` = an
+ethalon qrel sits inside the block's top-2 entries (the block holds ≤2
+positions, so this is the hint's own recall figure — lower than recall@5 by
+construction); `junk` = a block formed on an `empty` query (AC3 for the hint,
+target 0/10).
+
+Set C by kind (product vs baseline recall@5): **easy 0.6000 → 0.6333 vs
+0.6667; hard 0.9000 vs 0.9000**.
 
 What this means, plainly: the acceptance criterion **AC2** (product ≥ baseline
-recall@5) holds on the validation set A but **fails on B and C**; **AC3**
-(junk queries return nothing) is 0/10 on A, **3/10 on B** (#53 `rag-kit`,
-#56 `copy-editing`, #57 `landing-page-copy`) and **1/10 on C** (#59 →
-`windows-powershell-ops`). One honest history note: right after v0.2 B briefly
+recall@5) still holds on the validation set A (0.7200 vs 0.7000) but **fails
+on B and C**; **AC3** — since v0.3 an attribute of the **hint**, «no random
+hints» — is 0/10 on A, **3/10 on B** (#53 `rag-kit`, #56 `copy-editing`, #57
+`landing-page-copy`) and **1/10 on C** (#59 → `windows-powershell-ops`), all
+three numbers identical to the pre-split run. The `find` output itself now
+deliberately contains non-confident positions: on the 10 `empty` queries of
+each set the top-5 holds a `confident:true` position in **0/10 (A), 2/10 (B),
+1/10 (C)** — that is a property of the full list, not of the hint, and
+`docs/contract.md` says so. One honest history note: right after v0.2 B briefly
 measured 4/10 — #51 `saas-msa-review` passed the gate on the weak pair
 `подписка↔subscription` plus an incidental `cloud`; v0.2.1 (weak pairs out of
 coverage) removed it, and B recall@5 rose with it (see the table above). The
@@ -484,12 +583,16 @@ tuned against).
 ## Known limitations
 
 - **Lexical search, no semantics**: on the independent acceptance sets the
-  product loses to plain BM25 on short queries — the coverage rule
-  («2 significant words») cuts short, precise queries that overlap a skill on
-  a single word.
+  product loses to plain BM25 (B 0.7800 vs 0.8400, C 0.7400 vs 0.7600 even
+  after v0.3 ungated the list), and on the validation set A the full-list
+  recall@5 **fell** 0.7600 → 0.7200 with the gate removed — non-confident
+  matches now crowd the top-5. The coverage rule itself («2 significant
+  words») still gates the **hint**, so a short precise query that overlaps a
+  skill on a single word is **shown by `find` but not hinted**.
 - **Residual false positives on everyday requests**: e.g. «Advise running
   shoes for rainy morning runs» → `windows-powershell-ops` (matched through
-  «runn»/«run»), set C #59.
+  «runn»/«run»), set C #59 — confident there, so the hint shows it: junk-rate
+  on C stays 1/10 (B 3/10, target 0/10).
 - **The bilingual bridge is only as good as its dictionary** (v0.2): a
   Russian query reaches an English-described skill only when the skill's text
   contains one of the 177 dictionary terms in `core/lexicon.ru-en.json`;
@@ -513,6 +616,7 @@ npm run smoke                               # index over the real skill roots, 5
 npm run measure                             # set A (validation): product vs baseline recall@5 / NDCG@10
 node measure/run.mjs --set measure/heldout-b.jsonl   # set B (acceptance)
 node measure/run.mjs --set measure/heldout-c.jsonl   # set C (acceptance, final)
+node measure/hint.mjs                       # hint metrics on A/B/C: formed / hit@2 / junk on empty (+ --json)
 node measure/latency.mjs                    # hint-formation latency p50/p95/max + first-call build
 node cli/plugin-demo.mjs                    # print the exact <skill_hint> block (+ timing)
 ```

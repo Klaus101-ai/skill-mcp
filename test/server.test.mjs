@@ -207,18 +207,36 @@ test("MCP: find / outline / read-section contracts and validation", async () => 
       assert.ok(typeof item.name === "string");
       assert.ok(typeof item.score === "number");
       assert.ok(item.why.length <= 160);
+      assert.equal(typeof item.confident, "boolean", "v0.3: every item carries the confident flag");
     }
+    // v0.3: a query equal to a skill name always proves that skill -> at least
+    // one confident position, so no `note` is attached.
+    assert.ok(hitPayload.items.some((i) => i.confident === true), "skill-name query must yield a confident hit");
+    assert.ok(!("note" in hitPayload), `no note when a confident position exists: ${JSON.stringify(hitPayload)}`);
 
     // find: empty query
     const empty = payloadOf(await s.request("tools/call", { name: "find", arguments: { query: "" } }));
     assert.deepEqual(empty, { ok: true, items: [], note: "пустой запрос" });
 
-    // find: AC3 — meaningful tokens of this query are in no skill text
-    // (M7 coverage gate in core search) -> the documented empty answer.
+    // find: junk query — its meaningful tokens occur in no skill text, but
+    // v0.3 search is NOT gated: the raw matches are returned with
+    // confident:false and only the note reports that nothing is confident.
     const noMatch = payloadOf(
       await s.request("tools/call", { name: "find", arguments: { query: "Как сварить борщ с говядиной" } }),
     );
-    assert.deepEqual(noMatch, { ok: true, items: [], note: "ничего не найдено" });
+    assert.equal(noMatch.ok, true);
+    assert.ok(Array.isArray(noMatch.items) && noMatch.items.length > 0, "v0.3: the full list is returned");
+    assert.ok(
+      noMatch.items.every((i) => i.confident === false),
+      `no position may be confident: ${JSON.stringify(noMatch.items.map((i) => i.name))}`,
+    );
+    assert.equal(noMatch.note, "уверенных совпадений нет");
+
+    // find: a query nothing matches at all still answers the empty form
+    const noHits = payloadOf(
+      await s.request("tools/call", { name: "find", arguments: { query: "qqqzzzxyw nonexistenttoken" } }),
+    );
+    assert.deepEqual(noHits, { ok: true, items: [], note: "ничего не найдено" });
 
     // find: validation
     const noQuery = payloadOf(await s.request("tools/call", { name: "find", arguments: {} }));

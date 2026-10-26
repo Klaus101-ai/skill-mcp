@@ -1,10 +1,12 @@
 # skill-router — product contract
 
 Source of truth: the product specification (`spec.md` §5 R1–R6, §6 tool
-contracts, §7 hint contract), owner decisions of 25.10.2026 (§4). The English
-text below is a faithful summary; where the specification wording matters, the
-original Russian text is quoted verbatim. Companion to the
-[README](../README.md).
+contracts, §7 hint contract), owner decisions of 25.10.2026 (§4) and the owner
+decision of 26.10.2026 to split search from the hint (v0.3: `find` returns the
+full list with a `confident` flag, the hint is built from `confident:true`
+only). The English text below is a faithful summary; where the specification
+wording matters, the original Russian text is quoted verbatim. Companion to
+the [README](../README.md).
 
 ## R1–R6 (requirements)
 
@@ -53,6 +55,11 @@ Mandatory wrapper (R1, verbatim):
 
 - at most **2** positions (R6); each position = skill name, one «why» line
   taken from `description`, and how to open it (`skill` tool, `name=…`);
+- **candidates come from `confident:true` search positions only** (v0.3,
+  owner decision 26.10.2026): `confident` = ≥ `min(2, N)` significant query
+  tokens covered, the former shared gate; a result list without a single
+  confident position produces **no block at all** — this is where AC3
+  («no random hints») is binding, as opposed to the full `find` output;
 - the whole block **≤ 1000 characters** (R6) ≈ ≤ 250 tokens (chars / 4);
 - forbidden: claiming the skill is loaded/opened (R1); quoting skill bodies;
   more than 2 positions or 1000 chars; passing itself off as the «Скиллы»
@@ -73,15 +80,26 @@ AC4).
 
 ### `find`
 
+v0.3 (owner decision 26.10.2026 — search split from the hint): `find` returns
+the **full** result list; the coverage rule no longer filters it and only
+flags each position.
+
 | | |
 |---|---|
 | Input | `query: string` (required), `limit?: integer` (default 5, **max 10**), `restrict_to?: string[]` (skill-name / glob allowlist filter) |
-| Answer | `{ok:true, items:[{name, path, score, why}]}` sorted by descending `score`; `why` — one line, ≤160 chars |
-| Index fields | `name` (×3), `description` (×2), `headings` (×1), **`aliases` (×1)** — the v0.2 bilingual bridge: RU↔EN dictionary equivalents of the document's own terms, written at index time from the static `core/lexicon.ru-en.json` (local file only, no network/LLM, R5); the query-side gate (AC3 coverage, ≥`min(2, N)` significant tokens) applies to alias matches like any other token, except the weak pairs listed in `core/lexicon.ru-en.json` under `_weak` — those rank but never count toward coverage (v0.2.1) |
+| Answer | `{ok:true, items:[{name, path, score, why, confident}]}` sorted by descending `score`; `why` — one line, ≤160 chars; `confident: boolean` — the position covers ≥ `min(2, N)` significant query tokens (N = the number of the query's meaningful tokens), i.e. it would be eligible for the hint |
+| Index fields | `name` (×3), `description` (×2), `headings` (×1), **`aliases` (×1)** — the v0.2 bilingual bridge: RU↔EN dictionary equivalents of the document's own terms, written at index time from the static `core/lexicon.ru-en.json` (local file only, no network/LLM, R5); the confidence rule (≥`min(2, N)` significant tokens by token equality) applies to alias matches like any other token, except the weak pairs listed in `core/lexicon.ru-en.json` under `_weak` — those rank but never count toward confidence (v0.2.1) |
 | Limits | ≤10 items; ≤1 `why` line per item; other fields truncated |
 | Empty query | `{ok:true, items:[], note:"пустой запрос"}` |
-| No match | `{ok:true, items:[], note:"ничего не найдено"}` (AC3: no random hints) |
+| No hits at all | `{ok:true, items:[], note:"ничего не найдено"}` |
+| Hits, none confident | `{ok:true, items:[{…, confident:false}, …], note:"уверенных совпадений нет"}` — the list is still returned (v0.3) |
 | Errors | `E_INVALID_INPUT` (not a string, `limit` outside 1–10 — rejected, not clamped), `E_UNAVAILABLE` (skill directory unavailable / index not built; the call fails, opencode still starts) |
+
+**AC3 caveat (owner decision 26.10.2026).** The acceptance criterion AC3 —
+«no random hints» — applies to the **hint** (`plugin/hint.mjs`, which builds
+its block from `confident:true` positions only), **not** to the full `find`
+output: `find` may legitimately return `confident:false` positions, and the
+absence of confident ones is reported by `note`, not by an empty list.
 
 ### `outline`
 

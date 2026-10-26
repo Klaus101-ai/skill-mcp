@@ -14,6 +14,13 @@
 //   - fail-open, `SKILL_ROUTER_HINT=off` switch, ≤2 items / ≤1000 chars /
 //     ≤150 ms budget (R6).
 //
+// v0.3 (owner decision 26.10.2026 — search split from the hint): `search()`
+// returns the full result list with a `confident` flag per position; this
+// hint is built from `confident:true` positions only, so AC3 («no random
+// hints») still holds for the hint while `find` may return non-confident
+// positions. No confident position → no block (behaviour identical to an
+// empty result).
+//
 // Read-only by contract: this module opens files for reading only.
 import fs from "node:fs";
 import path from "node:path";
@@ -33,7 +40,7 @@ export const HINT_MARKER = `<skill_hint source="${HINT_SOURCE}"`;
 export const MAX_ITEMS = 2; // R6
 export const MAX_BLOCK_CHARS = 1000; // R6
 export const BUDGET_MS = 150; // R6
-const SEARCH_LIMIT = 10; // candidate pool before deny/allow filtering
+const SEARCH_LIMIT = 10; // candidate pool before the confident + deny/allow filters
 const WHY_MAX = 200; // per-entry «зачем» line cap (block stays ≤1000 chars)
 const OFF_VALUES = new Set(["off", "0", "false"]);
 const LETTERS_RE = /\p{L}/u;
@@ -270,6 +277,12 @@ export function createContextHook(options = {}) {
       const found = query(state.index, text, { limit: SEARCH_LIMIT });
       const items = [];
       for (const hit of found) {
+        // v0.3 (owner decision 26.10.2026): search and hint are split — the
+        // full result list is no longer gated, so the hint filters it itself
+        // and shows ONLY `confident:true` positions (the former ≥min(2, N)
+        // coverage rule). No confident position → no block, exactly like an
+        // empty result: AC3 binds the hint, `find` returns everything.
+        if (!hit || hit.confident !== true) continue;
         if (typeof hit.name !== "string" || !SAFE_NAME_RE.test(hit.name)) continue; // name must fit the entry line
         if (nameMatches(hit.name, denyList)) continue; // R2: deny wins
         if (hasAllow && !nameMatches(hit.name, allowList)) continue; // allow-only agent

@@ -110,7 +110,13 @@ test("v0.2 regression: the owner's request-verb message yields no hint candidate
   }
   const idx = buildIndex(skills);
   const msg = "Ты можешь сам запустить тесты? Посмотри какие есть скилы. И попробуй их пррогнать";
-  assert.deepEqual(search(idx, msg, { limit: 10 }), []);
+  // v0.3: search returns the raw list — the message still proves nothing, so
+  // every position is confident:false and the hint (confident only) stays off.
+  const results = search(idx, msg, { limit: 10 });
+  assert.ok(
+    results.every((r) => r.confident === false),
+    `no position may be confident: ${results.map((r) => `${r.name}:${r.confident}`).join(", ")}`,
+  );
 });
 
 // ── 4. lexicon validity (static file, R5) ──────────────────────────────────
@@ -160,11 +166,15 @@ test("v0.2.1: a weak alias never counts toward coverage («письмо» via `l
   // the weak alias IS still indexed — raw MiniSearch sees «письмо» (it ranks)
   assert.ok(idx.search("письмо").length >= 1, "weak alias must stay in the index");
   // … but it can not help PROVE the topic: 1 of 2 meaningful tokens (только
-  // «договор») → the gate cuts the doc.
-  assert.deepEqual(search(idx, "письмо договор", { limit: 5 }), []);
-  // control: with a strong pair the very same doc is reachable (1 of 1)
-  assert.equal(search(idx, "договор", { limit: 5 }).length, 1, "strong pair must still cover");
-  assert.equal(search(idx, "letter", { limit: 5 }).length, 1, "the EN word itself is own text, not an alias");
+  // «договор») → the position is returned with confident:false (v0.3) and the
+  // hint therefore never shows it.
+  const partial = search(idx, "письмо договор", { limit: 5 });
+  assert.equal(partial.length, 1, "the raw match is returned (v0.3)");
+  assert.equal(partial[0].name, "skill-letter");
+  assert.equal(partial[0].confident, false, "a weak alias proves nothing");
+  // control: with a strong pair the very same doc is reachable and confident (1 of 1)
+  assert.equal(search(idx, "договор", { limit: 5 })[0]?.confident, true, "strong pair must still cover");
+  assert.equal(search(idx, "letter", { limit: 5 })[0]?.confident, true, "the EN word itself is own text, not an alias");
 });
 
 test("v0.2.1: weak aliases still influence ranking — they only stop proving", () => {
