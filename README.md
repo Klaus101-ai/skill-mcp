@@ -90,12 +90,15 @@ The config (mcp + plugins) is loaded only at startup — restart to apply.
 
 ### 5. deny/allow config (`plugin/skill-router.config.json`)
 
-```jsonc
+```json
 {
-  "deny":  { "tenderwriter": ["contract-review*"] }, // never hinted for this agent
-  "allow": { "some-agent": ["skill-a", "skill-b*"] } // ONLY these are hinted for this agent
+  "deny":  { "tenderwriter": ["contract-review*"] },
+  "allow": { "some-agent": ["skill-a", "skill-b*"] }
 }
 ```
+
+The config file must be strict JSON — comments are not allowed; a malformed
+file is ignored (fail-open). Use `SKILL_ROUTER_DEBUG=1` to see the warning.
 
 By default everything is hintable except the agent's `deny` entries; an
 `allow` list narrows it to those names (minus `deny`). Changes to this file
@@ -272,8 +275,8 @@ a hint that would exceed the time budget is dropped (reported with
 `SKILL_ROUTER_DEBUG=1`), and any internal error is swallowed: the model request
 continues without a hint instead of failing. The index is built **once per
 opencode process** on the first hook call; that first call pays the build
-(~330 ms on a 367-skill install) and is normally dropped by the 150 ms guard —
-the next dispatch hints normally.
+(~400 ms (measured 370–414 ms) on a 367-skill install) and is normally dropped
+by the 150 ms guard — the next dispatch hints normally.
 
 ### Files
 
@@ -393,8 +396,8 @@ agent, measured as built, never tuned against).
   shoes for rainy morning runs» → `windows-powershell-ops` (matched through
   «runn»/«run»), set C #59.
 - **The first hook call after process start gets no hint**: the index is
-  built lazily (~330 ms) and the 150 ms guard drops that first block; the
-  next dispatch hints normally.
+  built lazily (~400 ms (measured 370–414 ms)) and the 150 ms guard drops
+  that first block; the next dispatch hints normally.
 - **Measured on one machine**, with sets A/B/C of 60 queries each over 365
   skills — small samples, single-machine latency.
 

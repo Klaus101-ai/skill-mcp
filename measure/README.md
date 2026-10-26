@@ -525,5 +525,7 @@ node measure/baseline.mjs --k 5 --verbose   # standalone baseline on the draft s
 
 Numbers in the M4 report come from these commands, run **once**; numbers in the
 M5 report are the same commands re-run after the M5 changes, with the before/after
-table kept in `writer-report.md`. If a metric is below the baseline, it is
-reported as is — the set is never adjusted.
+table kept in this file (§ M5 § Weights). The contract these runs must satisfy is
+`docs/contract.md`; the headline figures live in the top-level README § Evaluation
+and in this file (per-set tables, per-kind and AC3 breakdowns). If a metric is
+below the baseline, it is reported as is — the set is never adjusted.
