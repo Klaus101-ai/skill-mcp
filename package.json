@@ -1,6 +1,6 @@
 {
   "name": "skill-router",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "description": "Local skill search and ranking for opencode: BM25-backed index over SKILL.md files, no network, no LLM.",
   "type": "module",
   "license": "MIT",

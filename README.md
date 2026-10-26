@@ -61,7 +61,7 @@ or the project `opencode.json(c)`):
 "mcp": {
   "skill-router": {
     "type": "local",
-    "command": ["node", "E:\\1_Products\\skill-router\\server\\index.mjs"],
+    "command": ["node", "<path-to-repo>\\server\\index.mjs"],
     "enabled": true
   }
 }
@@ -74,7 +74,7 @@ Add the absolute path of the plugin **directory** to the `plugins` array:
 ```jsonc
 // ~/.config/opencode/opencode.json(c)  or  <project>/opencode.json(c)
 "plugins": [
-  "E:\\1_Products\\skill-router\\plugin"
+  "<path-to-repo>\\plugin"
 ]
 ```
 
