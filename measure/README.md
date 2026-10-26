@@ -496,9 +496,12 @@ vs 0.9000** (all@5 0.5600 vs 0.5800; NDCG@10 easy 0.5817 vs 0.6532, hard
   other 9 empty queries returned `[]`.
 - missing qrels: none; all 50 qrel-bearing queries eligible.
 
-Index size in every run: **365 skills** = 367 `SKILL.md` files found on disk
-minus 2 collapsed duplicate paths (the same skill installed in more than one
-root counts once).
+Index size in every run: **365 skills**. There are 367 `SKILL.md` files on
+disk, but 2 of them are copies of `site-architecture` under `_backup\…`, which
+the walker skips by directory name (`SKIP_DIRS`), so 365 distinct files are
+indexed. Among those 365, 4 names occur twice in different roots (`foreman`,
+`impeccable`, `opc`, `web-clone`) — they are collapsed by `dedupeByName` in the
+output, not in the index.
 
 ## Latency (`latency.mjs`)
 

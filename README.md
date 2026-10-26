@@ -33,7 +33,7 @@ A / B / C measured, v0.3 split search from the hint.**
   and C; `AC2` holds on B and C as equality). See **Evaluation**, **Known
   limitations** and the reproduction commands in **Verification**.
 
-This is an early release (**v0.1**) with the limitations listed below — read
+This is an early release (**v0.3.1**) with the limitations listed below — read
 them before relying on it.
 
 ## Requirements
@@ -311,8 +311,9 @@ a hint that would exceed the time budget is dropped (reported with
 `SKILL_ROUTER_DEBUG=1`), and any internal error is swallowed: the model request
 continues without a hint instead of failing. The index is built **once per
 opencode process** on the first hook call; that first call pays the build
-(~400 ms (measured 370–414 ms) on a 367-skill install) and is normally dropped
-by the 150 ms guard — the next dispatch hints normally.
+(~460–540 ms for the index build on a 367-skill install; the first hint call
+after start ~490–540 ms) and is normally dropped by the 150 ms guard — the
+next dispatch hints normally.
 
 ### Files
 
@@ -614,8 +615,9 @@ tuned against).
   on 26.10.2026: «тесты» returned 7 results, 0 English-described; after v0.2
   it returns 36, 27 English-described.)
 - **The first hook call after process start gets no hint**: the index is
-  built lazily (~400 ms (measured 370–414 ms)) and the 150 ms guard drops
-  that first block; the next dispatch hints normally.
+  built lazily (~460–540 ms for the index build; the first hint call after
+  start ~490–540 ms) and the 150 ms guard drops that first block; the next
+  dispatch hints normally.
 - **Measured on one machine**, with sets A/B/C of 60 queries each over 365
   skills — small samples, single-machine latency.
 
