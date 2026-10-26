@@ -195,3 +195,34 @@ test("v0.3: a fully covered match is confident", () => {
   assert.equal(results.length, 1);
   assert.equal(results[0].confident, true, "2 of 2 significant tokens");
 });
+
+// ── v0.3.1: confident positions rank above unconfirmed ones ─────────────────
+
+test("v0.3.1: a confident result outranks an unconfirmed one with a higher score", () => {
+  const s = (name, description) => ({ name, path: `C:/x/${name}/SKILL.md`, description, bodyHeadings: [] });
+  const idx = buildIndex([
+    s("skill-proven", "banana split"),
+    s("skill-filler1", "banana split text"),
+    s("skill-filler2", "banana split notes"),
+    s("skill-filler3", "banana split stuff"),
+    s("skill-noise", "zebra zebra zebra zebra zebra zebra"),
+  ]);
+  const results = search(idx, "banana split zebra", { limit: 10 }); // N = 3 → need 2
+  const noise = results.find((r) => r.name === "skill-noise");
+  const proven = results.find((r) => r.name === "skill-proven");
+  assert.equal(noise.confident, false, "1 of 3 tokens never proves the topic");
+  assert.equal(proven.confident, true, "2 of 3 tokens do");
+  // premise: BM25 really scores the unconfirmed hit higher (zebra is rare, so
+  // its repeated term frequency outweighs two common covered tokens)
+  assert.ok(noise.score > proven.score, `premise broken: noise ${noise.score} vs proven ${proven.score}`);
+  assert.ok(
+    results.indexOf(proven) < results.indexOf(noise),
+    `confident must rank first: ${results.map((r) => `${r.name}:${r.confident ? "T" : "F"}`).join(", ")}`,
+  );
+  // and no unconfirmed position may sit above a confident one
+  const firstUnconfirmed = results.findIndex((r) => r.confident === false);
+  assert.ok(
+    firstUnconfirmed === -1 || results.slice(firstUnconfirmed).every((r) => r.confident === false),
+    "the confident group must be contiguous at the top",
+  );
+});

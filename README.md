@@ -483,6 +483,10 @@ skill actually **proves** the request.
 - **Pool**: the hint searches with the same `limit: 10` candidate pool and
   then keeps only `confident:true` entries; budgets (≤2 positions, ≤1000
   chars, ≤150 ms), fail-open, R1–R4 and deny/allow are unchanged.
+- **Order (v0.3.1)**: `confident:true` positions always rank above
+  `confident:false` ones (inside each group — score desc, then name/path), so
+  unconfirmed hits stay as extra material but never push a proven skill out of
+  the top-5.
 - **Measurement**: search metrics stay in `measure/run.mjs` (recall@5 / NDCG
   on the full list); the hint has its own harness `measure/hint.mjs`
   (formed-rate, top-2 hit-rate on easy/hard, junk-rate on `empty`, sets

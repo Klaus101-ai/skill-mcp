@@ -330,9 +330,10 @@ export function selectWinner(candidates) {
 
 /**
  * Search the index. Returns [{name, path, score, why, confident}] ordered by
- * score descending (ties broken deterministically by name, then path), with
- * duplicate skill names collapsed to their best-scoring entry. Empty /
- * whitespace-only / punctuation-only queries return [].
+ * `confident` first (true before false — v0.3.1), then score descending (ties
+ * broken deterministically by name, then path), with duplicate skill names
+ * collapsed to their best-scoring entry. Empty / whitespace-only /
+ * punctuation-only queries return [].
  *
  * v0.3 (owner decision 26.10.2026 — search split from the hint): the result
  * list is NOT gated any more. Every document MiniSearch finds is returned;
@@ -389,7 +390,15 @@ export function search(index, query, { limit = 5, restrict_to: restrictTo, boost
     }
     return { result: r, confident: false };
   });
-  withConfidence.sort((a, b) => compareResults(a.result, b.result));
+  // v0.3.1 (owner decision 26.10.2026): confident:true always ranks above
+  // confident:false. A confident position passed the coverage rule, i.e. the
+  // query's own tokens prove the topic; unconfirmed positions stay in the list
+  // as extra material, but they must never push proven hits out of the top-5.
+  // Inside each group the old relevance order holds (score desc, name, path).
+  withConfidence.sort((a, b) => {
+    if (a.confident !== b.confident) return a.confident ? -1 : 1;
+    return compareResults(a.result, b.result);
+  });
   const unique = dedupeByName(withConfidence.map((e) => ({ ...e.result, confident: e.confident })));
 
   const capped = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), unique.length) : unique.length;
