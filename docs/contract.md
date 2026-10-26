@@ -77,7 +77,7 @@ AC4).
 |---|---|
 | Input | `query: string` (required), `limit?: integer` (default 5, **max 10**), `restrict_to?: string[]` (skill-name / glob allowlist filter) |
 | Answer | `{ok:true, items:[{name, path, score, why}]}` sorted by descending `score`; `why` — one line, ≤160 chars |
-| Index fields | `name` (×3), `description` (×2), `headings` (×1), **`aliases` (×1)** — the v0.2 bilingual bridge: RU↔EN dictionary equivalents of the document's own terms, written at index time from the static `core/lexicon.ru-en.json` (local file only, no network/LLM, R5); the query-side gate (AC3 coverage, ≥`min(2, N)` significant tokens) applies to alias matches like any other token |
+| Index fields | `name` (×3), `description` (×2), `headings` (×1), **`aliases` (×1)** — the v0.2 bilingual bridge: RU↔EN dictionary equivalents of the document's own terms, written at index time from the static `core/lexicon.ru-en.json` (local file only, no network/LLM, R5); the query-side gate (AC3 coverage, ≥`min(2, N)` significant tokens) applies to alias matches like any other token, except the weak pairs listed in `core/lexicon.ru-en.json` under `_weak` — those rank but never count toward coverage (v0.2.1) |
 | Limits | ≤10 items; ≤1 `why` line per item; other fields truncated |
 | Empty query | `{ok:true, items:[], note:"пустой запрос"}` |
 | No match | `{ok:true, items:[], note:"ничего не найдено"}` (AC3: no random hints) |
