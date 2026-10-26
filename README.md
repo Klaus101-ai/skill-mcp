@@ -5,15 +5,29 @@ Local skill search and ranking for [opencode](https://opencode.ai). Indexes
 queries with a ranked list of matching skills. Everything runs locally:
 **no network, no LLM, no embeddings, no API keys, files are read-only.**
 
-Status: **M1 + M2 + M3 + M4 + M5 + M6 + M7** — core index, CLI smoke run,
-baseline evaluation, the **MCP server** (`server/`, stdio: `find` / `outline` /
-`read-section`), the **context hint plugin** (`plugin/`, `<skill_hint>` block
-before model dispatch), the held-out evaluation (**set A = validation**), the
-**M5 pipeline** (normalization + light stemming, the AC3 significant-match gate
-and the relative noise floor), the **M6 match semantics**: token-level
-equality instead of substrings, the dot/hyphen word rule and the upper-case
-acronym whitelist, and the **M7 validation rule**: the score threshold is gone,
-replaced by a **coverage rule** over a **standard service-word stop list**.
+Status: **M1–M7 complete, the M9 attempt reverted, final acceptance sets
+A / B / C measured.**
+
+- **M1–M4**: core index and ranking (`core/`), CLI smoke run, baseline
+  evaluation, the **MCP server** (`server/`, stdio: `find` / `outline` /
+  `read-section`), the **context hint plugin** (`plugin/`, `<skill_hint>` block
+  before model dispatch), and the held-out evaluation (**set A = validation**).
+- **M5–M7**: the matching pipeline — normalization + light stemming, the AC3
+  significant-match gate, token-level match semantics (dot/hyphen word rule,
+  upper-case acronym whitelist), and finally the **coverage rule** over a
+  **standard service-word stop list** (the score threshold was deleted).
+- **M8**: acceptance **set B** measured as built — `AC2` and `AC3` fail there,
+  numbers kept as measured (see Evaluation).
+- **M9** (informative-token coverage and typo tolerance) was tried and
+  **reverted** (`Revert M9`, `d1edd63`): it made recall worse, so HEAD runs
+  the M7/M8 behaviour again.
+- Final acceptance sets **A / B / C** are measured; the acceptance verdict is
+  mixed — two of the eight acceptance criteria fail (`AC2`, `AC3` on sets B
+  and C). See **Evaluation**, **Known limitations** and the reproduction
+  commands in **Verification**.
+
+This is an early release (**v0.1**) with the limitations listed below — read
+them before relying on it.
 
 ## Requirements
 
@@ -25,6 +39,68 @@ replaced by a **coverage rule** over a **standard service-word stop list**.
 ```sh
 npm install
 ```
+
+Connecting the product to opencode is an owner's action; the config is read
+once at startup, so **restart opencode after every change below**.
+
+### 1. MCP server
+
+One entry in the `mcp` section of the config (`~/.config/opencode/opencode.json(c)`
+or the project `opencode.json(c)`):
+
+```jsonc
+"mcp": {
+  "skill-router": {
+    "type": "local",
+    "command": ["node", "E:\\1_Products\\skill-router\\server\\index.mjs"],
+    "enabled": true
+  }
+}
+```
+
+### 2. Plugin
+
+Either add the absolute path of the entry to the `plugins` array:
+
+```jsonc
+// ~/.config/opencode/opencode.json(c)  or  <project>/opencode.json(c)
+"plugins": [
+  "E:\\1_Products\\skill-router\\plugin\\skill-router-hint.ts"
+]
+```
+
+or copy it into `~/.config/opencode/plugins/` — **keeping the repository
+layout**: the entry imports `./hint.mjs`, and `plugin/hint.mjs` imports
+`../core/*`, so the copied `plugin/*` files must stay **next to a `core/`
+directory** (from `~/.config/opencode/plugins/` the relative `../core/*`
+resolves to `~/.config/opencode/core/`, so copy `core/` there as well —
+`plugin/skill-router.config.json` rides along in the same folder). A single
+copied `.ts` file will not work on its own.
+
+### 3. Restart opencode
+
+The config (mcp + plugins) is loaded only at startup — restart to apply.
+
+### 4. Environment variables
+
+| Variable | Values | Effect |
+|---|---|---|
+| `SKILL_ROUTER_HINT` | `off`, `0`, `false` (case-insensitive) | turn the hint off entirely (default: enabled) |
+| `SKILL_ROUTER_DEBUG` | `1` | diagnostics to **stderr**: index build, dropped hints with timing, fail-open reasons |
+
+### 5. deny/allow config (`plugin/skill-router.config.json`)
+
+```jsonc
+{
+  "deny":  { "tenderwriter": ["contract-review*"] }, // never hinted for this agent
+  "allow": { "some-agent": ["skill-a", "skill-b*"] } // ONLY these are hinted for this agent
+}
+```
+
+By default everything is hintable except the agent's `deny` entries; an
+`allow` list narrows it to those names (minus `deny`). Changes to this file
+take effect after an opencode restart (config is read at startup); a missing
+or malformed config falls back to the defaults (fail-open).
 
 ## Usage
 
@@ -277,17 +353,64 @@ formation time, without opencode running.
 
 ## Evaluation
 
-See [`measure/README.md`](measure/README.md). Two roles, fixed in M5:
+Full methodology, per-set tables and history: [`measure/README.md`](measure/README.md).
+The product contract (R1–R6, hint block, tool contracts, safety guarantees):
+[`docs/contract.md`](docs/contract.md).
 
-- **set A** (`measure/heldout.jsonl`, commit `bbf9c74`) — independent, written
-  by a different agent before any run; its M4 numbers are frozen, so from M5 it
-  is the **validation set**: changes are verified here with a before/after
-  table. Queries and qrels never change; the stop list was extended exactly
-  once, in M7, to the standard service-word list dictated by that task (the
-  set files themselves stayed byte-identical); weights are chosen only through
-  a measured comparison whose numbers are recorded in `measure/README.md`.
-- **set B** — the honest **acceptance** set: a fresh held-out set to be built
-  later by an independent agent that has not seen these numbers.
+Three fixed sets, each written independently before any run on it (60 queries
+each, 365 skills in the index); numbers are **as measured** on 26.10.2026, not
+rounded or adjusted:
+
+| set | role | product recall@5 | baseline recall@5 | product NDCG@10 | baseline NDCG@10 | AC3 (junk → empty) |
+|---|---|---|---|---|---|---|
+| A (`measure/heldout.jsonl`) | validation | 0.7600 | 0.7000 | 0.6375 | 0.6368 | 0/10 |
+| B (`measure/heldout-b.jsonl`) | acceptance | 0.7600 | 0.8400 | 0.6317 | 0.6624 | 3/10 |
+| C (`measure/heldout-c.jsonl`) | acceptance (final) | 0.7200 | 0.7600 | 0.5915 | 0.6654 | 1/10 |
+
+Set C by kind (product vs baseline recall@5): **easy 0.6000 vs 0.6667;
+hard 0.9000 vs 0.9000**.
+
+What this means, plainly: the acceptance criterion **AC2** (product ≥ baseline
+recall@5) holds on the validation set A but **fails on B and C**; **AC3**
+(junk queries return nothing) is 0/10 on A, **3/10 on B** (#53 `rag-kit`,
+#56 `copy-editing`, #57 `landing-page-copy`) and **1/10 on C** (#59 →
+`windows-powershell-ops`). The baseline is a fair reference: an independent
+BM25 (k=1.2, b=0.7, smoothed IDF; document = name×2 + description + headings),
+no MiniSearch, no stemming, no gate.
+
+Set roles: **A = validation** (changes are judged by their before/after table
+there; queries and qrels are frozen, the stop list was extended exactly once,
+in M7); **B and C = acceptance** (fresh held-out sets built by an independent
+agent, measured as built, never tuned against).
+
+## Known limitations
+
+- **Lexical search, no semantics**: on the independent acceptance sets the
+  product loses to plain BM25 on short queries — the coverage rule
+  («2 significant words») cuts short, precise queries that overlap a skill on
+  a single word.
+- **Residual false positives on everyday requests**: e.g. «Advise running
+  shoes for rainy morning runs» → `windows-powershell-ops` (matched through
+  «runn»/«run»), set C #59.
+- **The first hook call after process start gets no hint**: the index is
+  built lazily (~330 ms) and the 150 ms guard drops that first block; the
+  next dispatch hints normally.
+- **Measured on one machine**, with sets A/B/C of 60 queries each over 365
+  skills — small samples, single-machine latency.
+
+## Verification
+
+How to reproduce everything:
+
+```sh
+npm test                                    # unit tests (node:test), incl. the spawned MCP server
+npm run smoke                               # index over the real skill roots, 5 fixed queries
+npm run measure                             # set A (validation): product vs baseline recall@5 / NDCG@10
+node measure/run.mjs --set measure/heldout-b.jsonl   # set B (acceptance)
+node measure/run.mjs --set measure/heldout-c.jsonl   # set C (acceptance, final)
+node measure/latency.mjs                    # hint-formation latency p50/p95/max + first-call build
+node cli/plugin-demo.mjs                    # print the exact <skill_hint> block (+ timing)
+```
 
 ## License
 

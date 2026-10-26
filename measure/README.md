@@ -2,7 +2,7 @@
 
 ## Query sets
 
-Two sets exist and they play different roles:
+Four query files exist and they play different roles:
 
 - `queries.jsonl` — **draft** set (28 queries, field `relevant`). It was written
   while building the harness, to smoke-check the scripts. It is **not** for
@@ -12,6 +12,10 @@ Two sets exist and they play different roles:
   agent and is **not** to be adjusted to the system. It was committed as
   `M4: held-out query set (independent)` **before** any measurement run, so the
   history proves the set predates the numbers.
+- `heldout-b.jsonl` — **set B** (60 queries), the acceptance set (§ M8),
+  committed before any run on it.
+- `heldout-c.jsonl` — **set C** (60 queries), the final acceptance set
+  (§ Final acceptance (set C)), committed before any run on it.
 
 ### Status change (M5): set A is now the VALIDATION set
 
@@ -31,6 +35,9 @@ against it (that is what a validation set is for). From M5 on:
   fresh held-out set B later, with no knowledge of these numbers, and acceptance
   runs there. The formulations in `heldout.jsonl` are **not** modified — the file
   stays byte-identical to commit `bbf9c74`, so M4 and M5 numbers stay comparable.
+  *Update: set B was built and measured as `heldout-b.jsonl` (§ M8), and the
+  final acceptance set C as `heldout-c.jsonl` (§ Final acceptance (set C)) —
+  both committed before any run on them.*
 
 `heldout.jsonl` line shape:
 
@@ -336,7 +343,7 @@ be re-derived when the corpus or the query set changes.
 | hard NDCG@10 | 0.4996 | 0.4996 | **0.5349** |
 | ALL recall@5 / all@5 | 0.7200 / 0.6200 | 0.7200 / 0.6200 | **0.7600 / 0.6200** |
 | ALL NDCG@10 | 0.6161 | 0.6161 | **0.6375** |
-| AC3 non-empty | 2/10 (#58, #59) | 2/10 (#58, #59) | **0/10 — 10/10 closed** |
+| AC3 non-empty | 2/10 (#58, #59) | 2/10 (#58, #59) | **0/10 — 10/10 closed (set A only; on B it is 3/10, on C 1/10 — see § Final acceptance (set C) and § M8)** |
 | draft set (28) product recall@5 | 0.9643 (27/28, MISS #13) | 0.9643 (27/28, MISS #13) | **1.0000 (28/28)** |
 | warm search p95 | 1.68 ms | 2.38 ms | **2.14 ms** |
 | weights winner | 3/2/1 | 3/2/1 | **3/2/1 (re-run, same winner; no candidate beats it)** |
@@ -461,6 +468,38 @@ rule cut every candidate; five hard misses lose one of two qrels each (their
 measure/heldout-b.jsonl` (human + `--json`). `node measure/latency.mjs` →
 warm p95 2.55 ms (search) / 2.34 ms (hint path), first call 370.14 ms.
 
+## Final acceptance (set C)
+
+Set C (`measure/heldout-c.jsonl`, 60 queries, committed **before** any run on
+it as `Acceptance: query set C (independent, final)`, `ba7636d`) is the
+**final acceptance** set: built by an independent agent, measured as built,
+never tuned against. Command:
+
+```sh
+node measure/run.mjs --set measure/heldout-c.jsonl
+```
+
+| set | role | product recall@5 | baseline recall@5 | product NDCG@10 | baseline NDCG@10 | AC3 (junk → empty) |
+|---|---|---|---|---|---|---|
+| C (`heldout-c.jsonl`) | acceptance (final) | 0.7200 | 0.7600 | 0.5915 | 0.6654 | 1/10 |
+
+By kind (recall@5, product vs baseline): **easy 0.6000 vs 0.6667; hard 0.9000
+vs 0.9000** (all@5 0.5200 vs 0.5800; NDCG@10 easy 0.5234 vs 0.6532, hard
+0.6937 vs 0.6836).
+
+- **AC2 on C: NOT met** — product recall@5 0.7200 < baseline 0.7600 (36/50 vs
+  38/50 eligible queries); the run prints
+  `product recall@5 >= baseline: NO`.
+- **AC3 on C: 1/10** — #59 «Advise running shoes for rainy morning runs»
+  returned a positive-scoring list (`windows-powershell-ops:93.335`,
+  `skill-creator:70.036`, `foreman:66.416`, `perfect-web-clone:61.436`); the
+  other 9 empty queries returned `[]`.
+- missing qrels: none; all 50 qrel-bearing queries eligible.
+
+Index size in every run: **365 skills** = 367 `SKILL.md` files found on disk
+minus 2 collapsed duplicate paths (the same skill installed in more than one
+root counts once).
+
 ## Latency (`latency.mjs`)
 
 Same path as the plugin (`plugin/hint.mjs` `createContextHook`): one factory
@@ -477,7 +516,8 @@ npm install
 npm test                  # must stay green (incl. text/ac3 M5 tests)
 node measure/run.mjs      # human table (product vs baseline, by kind + AC3)
 node measure/run.mjs --json  # same numbers, machine-readable, incl. per-query tops
-node measure/run.mjs --set measure/heldout-b.jsonl  # same metrics on set B (M8)
+node measure/run.mjs --set measure/heldout-b.jsonl  # same metrics on set B (acceptance, M8)
+node measure/run.mjs --set measure/heldout-c.jsonl  # same metrics on set C (acceptance, final)
 node measure/weights.mjs  # field-weight candidates on set A (M5)
 node measure/latency.mjs  # p50/p95/max + first-call (index build)
 node measure/baseline.mjs --k 5 --verbose   # standalone baseline on the draft set
