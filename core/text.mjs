@@ -101,6 +101,23 @@ const RAW_STOP_WORDS = [
   // short Russian list kept from M5/M6 (и, в, во, на, по, с, со, к, о, об,
   // от, до, за, из, не) — none of them is in the M7 list above
   "и", "в", "во", "на", "по", "с", "со", "к", "о", "об", "от", "до", "за", "из", "не",
+  // v0.2 request verbs (owner-approved 26.10.2026): words that only ASK for
+  // an action carry no topic — «запусти посмотри попробуй» must prove nothing.
+  // SUBJECT verbs stay significant on purpose: проверь/проверить/проверка,
+  // аудит, review (they correlate with the topic and already work).
+  // "можно"/"нужно"/"надо"/"бы"/"еще" are already listed above (M7).
+  "запустить", "запусти", "запускай",
+  "посмотреть", "посмотри", "посмотрим",
+  "глянуть", "глянь",
+  "попробовать", "попробуй",
+  "прогнать", "прогони", "прогоняй",
+  "сделать", "сделай",
+  "помочь", "помоги",
+  "подсказать", "подскажи",
+  "показать", "покажи",
+  "найти", "найди",
+  "можешь", "давай", "плиз", "пожалуйста", "хочу", "хотел",
+  "сам", "сама", "само",
 ];
 
 export const STOP_WORDS = new Set(RAW_STOP_WORDS.map((w) => normalizeTerm(w)));

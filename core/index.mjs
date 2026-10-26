@@ -1,15 +1,88 @@
 // Index and ranking over discovered skills, backed by MiniSearch (BM25+).
-// Field weights: name x3, description x2, headings x1 (spec, M1; re-chosen
-// in M5 against measure/README.md, the value below is the selected winner).
+// Field weights: name x3, description x2, headings x1, aliases x1 (spec, M1;
+// re-chosen in M5 against measure/README.md; aliases added in v0.2 — the
+// bilingual bridge rides in a separate field so it never displaces the
+// original fields' relative weights).
 // Normalization + stemming + the significant-match gate (AC3) live in
 // core/text.mjs and are applied identically to documents and queries.
-// No network calls, no writes: R5.
+// No network calls, no writes, no AI: the RU↔EN bridge is one static file
+// (core/lexicon.ru-en.json), R5.
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import MiniSearch from "minisearch";
 import { STOP_WORDS, processTerm, significantQueryTokens, tokenize } from "./text.mjs";
 
 const WHY_LIMIT = 160;
 const WHY_TERMS_LIMIT = 6;
-const FIELD_BOOST = { name: 3, description: 2, headings: 1 };
+const FIELD_BOOST = { name: 3, description: 2, headings: 1, aliases: 1 };
+
+// ── v0.2 bilingual term bridge ─────────────────────────────────────────────
+// Static RU↔EN dictionary: { "русский термин": ["en", ...] }. At INDEX time a
+// document whose text contains a dictionary term gets the *other-language*
+// equivalents written into a separate indexed field `aliases` (weight 1), so
+// a Russian query finds an English-described skill and vice versa. Stemming
+// and normalization hit aliases exactly like any other field — they are
+// produced by the same tokenize/processTerm pipeline (MiniSearch applies the
+// pipeline to every field). Read-only local file; no network, no LLM (R5).
+const LEXICON_PATH = fileURLToPath(new URL("./lexicon.ru-en.json", import.meta.url));
+
+let lexiconCache = null;
+
+/** Build (once) stem-keyed lookup: term-stem -> [equivalent words, other language]. */
+function loadLexicon() {
+  if (lexiconCache) return lexiconCache;
+  let map = new Map();
+  try {
+    const raw = JSON.parse(fs.readFileSync(LEXICON_PATH, "utf8")); // read-only
+    for (const [ru, ens] of Object.entries(raw)) {
+      if (!Array.isArray(ens)) continue;
+      const ruKey = processTerm(ru);
+      for (const en of ens) {
+        if (typeof en !== "string" || !en) continue;
+        // RU term -> EN equivalents (a Russian query finds EN-described skills)
+        if (ruKey) addUnique(map, ruKey, en.toLowerCase());
+        // symmetry: EN equivalent -> RU term (an English query finds RU-described skills).
+        // Service/short tokens of a multi-word equivalent ("of" in "power of
+        // attorney") are skipped: they are common English glue words and would
+        // stamp the RU term onto every English document that contains them.
+        for (const tok of tokenize(en)) {
+          const enKey = processTerm(tok);
+          if (!enKey || enKey.length < 3 || STOP_WORDS.has(enKey)) continue;
+          addUnique(map, enKey, ru.toLowerCase());
+        }
+      }
+    }
+  } catch {
+    // a missing/malformed lexicon only disables the bridge — never breaks indexing
+    map = new Map();
+  }
+  lexiconCache = map;
+  return map;
+}
+
+function addUnique(map, key, value) {
+  const list = map.get(key);
+  if (!list) map.set(key, [value]);
+  else if (!list.includes(value)) list.push(value);
+}
+
+/**
+ * The `aliases` text for a document: every dictionary equivalent of a term
+ * found in `text` (name + description + headings), space-joined. "" when the
+ * text shares no dictionary term with the lexicon.
+ */
+function buildAliases(text) {
+  const lex = loadLexicon();
+  if (lex.size === 0) return "";
+  const found = new Set();
+  for (const raw of tokenize(text)) {
+    const key = processTerm(raw);
+    if (!key) continue;
+    const hit = lex.get(key);
+    if (hit) for (const v of hit) found.add(v);
+  }
+  return [...found].join(" ");
+}
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
@@ -52,7 +125,7 @@ export function buildIndex(skills) {
   // both when indexing these documents and when processing a query string,
   // so documents and queries share one normalization/stemming pipeline.
   const index = new MiniSearch({
-    fields: ["name", "description", "headings"],
+    fields: ["name", "description", "headings", "aliases"],
     storeFields: ["name", "path", "description", "headings"],
     tokenize,
     processTerm,
@@ -64,6 +137,9 @@ export function buildIndex(skills) {
     path: s.path,
     description: s.description || "",
     headings: Array.isArray(s.bodyHeadings) ? s.bodyHeadings.join(" ") : "",
+    // v0.2 bilingual bridge: RU↔EN dictionary equivalents of the document's
+    // own terms, one static file, weight 1 (core/lexicon.ru-en.json).
+    aliases: buildAliases([s.name, s.description, (s.bodyHeadings || []).join(" ")].join(" ")),
   }));
   index.addAll(docs);
   return index;

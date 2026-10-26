@@ -373,6 +373,40 @@ formation time, without opencode running.
 `resolveSkillPath(skill, root)` refuses any path that resolves outside its root
 (path-traversal guard).
 
+## Bilingual search (RU ↔ EN, v0.2)
+
+A large part of the skill corpus is described in English, so a Russian query
+like «тесты» used to reach only the Russian-described skills. v0.2 adds a
+**static term bridge**:
+
+- **Dictionary**: [`core/lexicon.ru-en.json`](core/lexicon.ru-en.json) — a
+  plain JSON file `{ "русский термин": ["english", "equivalents"] }`,
+  **177 pairs** across the domains of the corpus (law/contracts, tenders,
+  apps, sites, texts, data/privacy, development, security, HR, finance).
+  Nothing else: no network, no LLM, no embeddings (R5) — the bridge is
+  exactly this one file.
+- **How it works**: at index time each skill's `name + description + headings`
+  is scanned for dictionary terms. Every hit writes the *other-language*
+  equivalents into a separate indexed field **`aliases`** (weight 1, after
+  name ×3 / description ×2 / headings ×1). The symmetry is derived from the
+  same file: a document containing `contract` gets `договор` in `aliases`, a
+  document containing `договор` gets `contract` — so a Russian query finds an
+  English-described skill and an English query finds a Russian-described one.
+- **Same pipeline as everything else**: `aliases` is tokenized, normalized
+  and stemmed by the same `core/text.mjs` functions as every other field, so
+  «тесты» matches the alias `test` through stemming, and the AC3 coverage
+  gate applies to alias matches like any other token.
+
+**How to extend**: add a line to `core/lexicon.ru-en.json`
+`"русский": ["english"]` (one JSON key per term, values are non-empty string
+arrays, keys must stay unique — `npm test` enforces all of this and the
+150–250 pair range). Re-run `npm test` and `npm run measure`; no code change
+is needed.
+
+Measured effect on the fixed sets (26.10.2026): set A recall@5 stays
+**0.7600**, AC3 stays **0/10**; «тесты» now returns 36 skills (27 with an
+English description, 0 before), `contract` 43 (12 with a Russian description).
+
 ## Evaluation
 
 Full methodology, per-set tables and history: [`measure/README.md`](measure/README.md).
@@ -385,9 +419,15 @@ rounded or adjusted:
 
 | set | role | product recall@5 | baseline recall@5 | product NDCG@10 | baseline NDCG@10 | AC3 (junk → empty) |
 |---|---|---|---|---|---|---|
-| A (`measure/heldout.jsonl`) | validation | 0.7600 | 0.7000 | 0.6375 | 0.6368 | 0/10 |
-| B (`measure/heldout-b.jsonl`) | acceptance | 0.7600 | 0.8400 | 0.6317 | 0.6624 | 3/10 |
-| C (`measure/heldout-c.jsonl`) | acceptance (final) | 0.7200 | 0.7600 | 0.5915 | 0.6654 | 1/10 |
+| A (`measure/heldout.jsonl`) | validation | 0.7600 | 0.7000 | 0.6486 | 0.6368 | 0/10 |
+| B (`measure/heldout-b.jsonl`) | acceptance | 0.7600 | 0.8400 | 0.6345 | 0.6624 | 3/10 |
+| C (`measure/heldout-c.jsonl`) | acceptance (final) | 0.7200 | 0.7600 | 0.5871 | 0.6654 | 1/10 |
+
+Re-measured after v0.2 (26.10.2026): recall@5 on all three sets is
+**unchanged** (0.7600 / 0.7600 / 0.7200); NDCG@10 moved slightly (A
+0.6375 → 0.6486, B 0.6317 → 0.6345, C 0.5915 → 0.5871) as the `aliases`
+field re-ranked ties. Before v0.2 the NDCGs were A 0.6375, B 0.6317,
+C 0.5915.
 
 Set C by kind (product vs baseline recall@5): **easy 0.6000 vs 0.6667;
 hard 0.9000 vs 0.9000**.
@@ -414,6 +454,13 @@ agent, measured as built, never tuned against).
 - **Residual false positives on everyday requests**: e.g. «Advise running
   shoes for rainy morning runs» → `windows-powershell-ops` (matched through
   «runn»/«run»), set C #59.
+- **The bilingual bridge is only as good as its dictionary** (v0.2): a
+  Russian query reaches an English-described skill only when the skill's text
+  contains one of the 177 dictionary terms in `core/lexicon.ru-en.json`;
+  terms outside the dictionary still do not cross languages. (No README
+  limitation existed for this before v0.2 — the gap was found in diagnostics
+  on 26.10.2026: «тесты» returned 7 results, 0 English-described; after v0.2
+  it returns 36, 27 English-described.)
 - **The first hook call after process start gets no hint**: the index is
   built lazily (~400 ms (measured 370–414 ms)) and the 150 ms guard drops
   that first block; the next dispatch hints normally.
