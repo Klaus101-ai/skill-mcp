@@ -24,23 +24,47 @@ const FIELD_BOOST = { name: 3, description: 2, headings: 1, aliases: 1 };
 // and normalization hit aliases exactly like any other field — they are
 // produced by the same tokenize/processTerm pipeline (MiniSearch applies the
 // pipeline to every field). Read-only local file; no network, no LLM (R5).
+//
+// v0.2.1 — weak pairs (the `_weak` key of the same file): seven bilingual
+// pairs whose two sides are BOTH ordinary words in the other language
+// (письмо↔letter, возврат↔return, подписка↔subscription, дизайн↔design,
+// форма↔form, лот↔lot, доверенность↔power). Their aliases are still INDEXED
+// and still RANK (they are part of the `aliases` field, weight unchanged) —
+// but they never COUNT TOWARD the AC3 coverage rule: a weak alias alone can
+// not prove a topic («подписк» via `subscription` + an unrelated «cloud» is
+// exactly the B#51 false positive this excludes). Coverage tokens are
+// collected per document into `cover` = own-text terms ∪ STRONG alias terms.
 const LEXICON_PATH = fileURLToPath(new URL("./lexicon.ru-en.json", import.meta.url));
+
+/** The meta key of the lexicon file holding the weak RU keys (not a pair). */
+const WEAK_KEY = "_weak";
 
 let lexiconCache = null;
 
-/** Build (once) stem-keyed lookup: term-stem -> [equivalent words, other language]. */
+/**
+ * Build (once) stem-keyed lookup: term-stem -> [{ term, weak }].
+ * `weak` marks an equivalence produced by one of the `_weak` RU keys —
+ * in BOTH directions (RU term -> EN equivalent and EN token -> RU term).
+ * If the same (key, value) pair is reachable from a strong key too, the
+ * strong source wins: one solid source must not lose coverage to a weak one.
+ */
 function loadLexicon() {
   if (lexiconCache) return lexiconCache;
   let map = new Map();
   try {
     const raw = JSON.parse(fs.readFileSync(LEXICON_PATH, "utf8")); // read-only
+    const weakKeys = new Set(
+      (Array.isArray(raw[WEAK_KEY]) ? raw[WEAK_KEY] : []).filter((k) => typeof k === "string"),
+    );
     for (const [ru, ens] of Object.entries(raw)) {
+      if (ru === WEAK_KEY) continue; // meta list, not a pair
       if (!Array.isArray(ens)) continue;
       const ruKey = processTerm(ru);
+      const weak = weakKeys.has(ru);
       for (const en of ens) {
         if (typeof en !== "string" || !en) continue;
         // RU term -> EN equivalents (a Russian query finds EN-described skills)
-        if (ruKey) addUnique(map, ruKey, en.toLowerCase());
+        if (ruKey) addUnique(map, ruKey, en.toLowerCase(), weak);
         // symmetry: EN equivalent -> RU term (an English query finds RU-described skills).
         // Service/short tokens of a multi-word equivalent ("of" in "power of
         // attorney") are skipped: they are common English glue words and would
@@ -48,7 +72,7 @@ function loadLexicon() {
         for (const tok of tokenize(en)) {
           const enKey = processTerm(tok);
           if (!enKey || enKey.length < 3 || STOP_WORDS.has(enKey)) continue;
-          addUnique(map, enKey, ru.toLowerCase());
+          addUnique(map, enKey, ru.toLowerCase(), weak);
         }
       }
     }
@@ -60,28 +84,44 @@ function loadLexicon() {
   return map;
 }
 
-function addUnique(map, key, value) {
+function addUnique(map, key, value, weak) {
   const list = map.get(key);
-  if (!list) map.set(key, [value]);
-  else if (!list.includes(value)) list.push(value);
+  if (!list) {
+    map.set(key, [{ term: value, weak }]);
+    return;
+  }
+  const found = list.find((e) => e.term === value);
+  if (!found) list.push({ term: value, weak });
+  else if (found.weak && !weak) found.weak = false; // a strong source wins
 }
 
 /**
  * The `aliases` text for a document: every dictionary equivalent of a term
  * found in `text` (name + description + headings), space-joined. "" when the
- * text shares no dictionary term with the lexicon.
+ * text shares no dictionary term with the lexicon. Returns both the full
+ * string (what gets INDEXED — weak pairs included, they still rank) and the
+ * stems of the STRONG equivalents only (what may COUNT as coverage).
  */
 function buildAliases(text) {
   const lex = loadLexicon();
-  if (lex.size === 0) return "";
+  if (lex.size === 0) return { all: "", strong: [] };
   const found = new Set();
+  const strong = new Set();
   for (const raw of tokenize(text)) {
     const key = processTerm(raw);
     if (!key) continue;
     const hit = lex.get(key);
-    if (hit) for (const v of hit) found.add(v);
+    if (!hit) continue;
+    for (const e of hit) {
+      found.add(e.term);
+      if (e.weak) continue; // weak: ranks, but can never prove a topic
+      for (const tok of tokenize(e.term)) {
+        const stem = processTerm(tok);
+        if (stem) strong.add(stem);
+      }
+    }
   }
-  return [...found].join(" ");
+  return { all: [...found].join(" "), strong: [...strong] };
 }
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
@@ -89,8 +129,14 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 // --- coverage rule (M7; replaces the M5/M6 score floor) ---------------------
 // A result is valid only when it COVERS enough of the query's meaningful
 // tokens: the number of matched significant tokens (token equality after the
-// shared normalization/stemming pipeline — MiniSearch `r.match` keys) must be
-// >= min(MIN_COVERAGE, N), where N = the number of significant query tokens.
+// shared normalization/stemming pipeline) must be >= min(MIN_COVERAGE, N),
+// where N = the number of significant query tokens. A token counts as matched
+// only when it occurs in the document's `cover` vocabulary (v0.2.1): the
+// document's own name/description/headings tokens + its STRONG bilingual
+// aliases. Weak pairs (the lexicon's `_weak` list) are indexed and still
+// rank, but never prove a topic on their own — the whole point of an
+// ambiguous pair («письмо»↔`letter`) is that it is shared with unrelated
+// skills.
 // The same single rule serves the MCP `find` and the plugin hint (both call
 // search()); when no result covers enough, the answer is [] and the MCP tool
 // answers {ok:true, items:[], note:"ничего не найдено"}.
@@ -126,21 +172,36 @@ export function buildIndex(skills) {
   // so documents and queries share one normalization/stemming pipeline.
   const index = new MiniSearch({
     fields: ["name", "description", "headings", "aliases"],
-    storeFields: ["name", "path", "description", "headings"],
+    storeFields: ["name", "path", "description", "headings", "cover"],
     tokenize,
     processTerm,
     bm25: { k: 1.2, b: 0.7 },
   });
-  const docs = skills.map((s, i) => ({
-    id: s.path || `skill-${i}`,
-    name: s.name,
-    path: s.path,
-    description: s.description || "",
-    headings: Array.isArray(s.bodyHeadings) ? s.bodyHeadings.join(" ") : "",
+  const docs = skills.map((s, i) => {
+    const text = [s.name, s.description || "", (s.bodyHeadings || []).join(" ")].join(" ");
     // v0.2 bilingual bridge: RU↔EN dictionary equivalents of the document's
     // own terms, one static file, weight 1 (core/lexicon.ru-en.json).
-    aliases: buildAliases([s.name, s.description, (s.bodyHeadings || []).join(" ")].join(" ")),
-  }));
+    const aliases = buildAliases(text);
+    // v0.2.1 coverage vocabulary (AC3): every term of the document's OWN text
+    // plus the stems of its STRONG aliases. Weak aliases are deliberately
+    // absent — they are indexed in `aliases` (and still rank) but can never
+    // count as one of the ≥ min(2, N) meaningful matches.
+    const cover = new Set();
+    for (const raw of tokenize(text)) {
+      const t = processTerm(raw);
+      if (t) cover.add(t);
+    }
+    for (const t of aliases.strong) cover.add(t);
+    return {
+      id: s.path || `skill-${i}`,
+      name: s.name,
+      path: s.path,
+      description: s.description || "",
+      headings: Array.isArray(s.bodyHeadings) ? s.bodyHeadings.join(" ") : "",
+      aliases: aliases.all,
+      cover: [...cover],
+    };
+  });
   index.addAll(docs);
   return index;
 }
@@ -264,16 +325,17 @@ export function selectWinner(candidates) {
  * duplicate skill names collapsed to their best-scoring entry.
  * Empty / whitespace-only / punctuation-only queries return [].
  *
- * AC3 coverage gate (M5 gate, M6 token-level match, M7 coverage rule): the
- * query first yields its meaningful tokens (>= 3 chars or a whitelisted
- * upper-case acronym, not stop words, normalized + stemmed — core/text.mjs).
- * If there are none, the answer is []. Otherwise a result document is kept
- * only when it contains at least `min(MIN_COVERAGE, N)` of those tokens by
- * EQUALITY (same normalization/stemming — never a substring of a longer word;
- * a dot keeps words together, a hyphen splits them) in
- * name/description/headings. MiniSearch's `r.match` lists the document terms
- * that matched this query, already normalized/stemmed by the very same
- * pipeline, so the containment check is exact and needs no second index.
+ * AC3 coverage gate (M5 gate, M6 token-level match, M7 coverage rule,
+ * v0.2.1 weak pairs): the query first yields its meaningful tokens
+ * (>= 3 chars or a whitelisted upper-case acronym, not stop words,
+ * normalized + stemmed — core/text.mjs). If there are none, the answer is [].
+ * Otherwise a result document is kept only when its `cover` vocabulary holds
+ * at least `min(MIN_COVERAGE, N)` of those tokens by EQUALITY (same
+ * normalization/stemming — never a substring of a longer word; a dot keeps
+ * words together, a hyphen splits them). `cover` is built at index time from
+ * name/description/headings plus the document's STRONG dictionary aliases;
+ * weak aliases (lexicon `_weak`) rank but never cover — MiniSearch's
+ * `r.match` alone would count them, so it is no longer the gate's source.
  * Scores rank the surviving list but never validate it — there is no score
  * threshold (M7 removed MIN_STRENGTH together with corpusCeiling). This one
  * rule is the whole AC3 story for every consumer: the MCP `find`
@@ -298,16 +360,21 @@ export function search(index, query, { limit = 5, restrict_to: restrictTo, boost
   }
 
   const matched = index.search(q, options);
-  // Coverage rule (M7): a result is valid only if it covers at least
-  // min(2, N) of the query's meaningful tokens (token equality after
-  // stemming). One shared token proves nothing; a 1–2-token query needs one.
+  // Coverage rule (M7, v0.2.1): a result is valid only if at least
+  // min(2, N) of the query's meaningful tokens occur in its `cover`
+  // vocabulary (own text + STRONG aliases) by token equality after stemming.
+  // One shared token proves nothing; a 1–2-token query needs one. Weak
+  // aliases never count here; a document stored without `cover` (not built
+  // by buildIndex) keeps the pre-v0.2.1 r.match behaviour.
   const need = Math.min(MIN_COVERAGE, sig.length);
   const gated = matched.filter((r) => {
-    const m = r.match;
-    if (!m) return false;
+    const cover = Array.isArray(r.cover) ? new Set(r.cover) : null;
+    const match = r.match || null;
+    if (!cover && !match) return false;
     let count = 0;
     for (const t of sig) {
-      if (hasOwn(m, t)) count += 1;
+      const hit = cover ? cover.has(t) : hasOwn(match, t);
+      if (hit) count += 1;
       if (count >= need) return true; // enough coverage, no need to scan on
     }
     return false;

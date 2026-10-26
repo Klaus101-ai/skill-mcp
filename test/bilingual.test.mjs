@@ -135,3 +135,50 @@ test("v0.2 lexicon: valid JSON, values are string arrays, keys unique, 150–250
     }
   }
 });
+
+// ── 5. v0.2.1 weak pairs: indexed and ranked, but never coverage ───────────
+
+test("v0.2.1 lexicon: exactly seven weak keys, each a real pair, «тест» not among them", () => {
+  const raw = JSON.parse(fs.readFileSync(LEXICON_PATH, "utf8"));
+  assert.ok(Array.isArray(raw._weak), "_weak must be a flat array of RU keys");
+  assert.deepEqual(
+    new Set(raw._weak),
+    new Set(["письмо", "возврат", "подписка", "дизайн", "форма", "лот", "доверенность"]),
+    "_weak must flag exactly the seven ambilateral pairs (both directions)",
+  );
+  for (const k of raw._weak) {
+    assert.ok(Array.isArray(raw[k]), `${k}: weak key must exist as a pair`);
+  }
+  // the language bridge for «тесты» depends on the `тест` pair staying strong
+  assert.ok(!raw._weak.includes("тест") && !raw._weak.includes("тестирование"));
+});
+
+test("v0.2.1: a weak alias never counts toward coverage («письмо» via `letter`)", () => {
+  // The doc's ONLY tie to «письмо» is the weak pair письмо↔letter; its
+  // «договор» (from `contract`) is a strong pair.
+  const idx = buildIndex([skill("skill-letter", "contract letter drafting for law firms")]);
+  // the weak alias IS still indexed — raw MiniSearch sees «письмо» (it ranks)
+  assert.ok(idx.search("письмо").length >= 1, "weak alias must stay in the index");
+  // … but it can not help PROVE the topic: 1 of 2 meaningful tokens (только
+  // «договор») → the gate cuts the doc.
+  assert.deepEqual(search(idx, "письмо договор", { limit: 5 }), []);
+  // control: with a strong pair the very same doc is reachable (1 of 1)
+  assert.equal(search(idx, "договор", { limit: 5 }).length, 1, "strong pair must still cover");
+  assert.equal(search(idx, "letter", { limit: 5 }).length, 1, "the EN word itself is own text, not an alias");
+});
+
+test("v0.2.1: weak aliases still influence ranking — they only stop proving", () => {
+  const idx = buildIndex([
+    skill("skill-letters", "supply contract templates and letter drafting"),
+    skill("skill-plain", "supply contract templates only"),
+  ]);
+  // Both docs cover «договор»+«поставка» through STRONG pairs (contract/supply),
+  // so both survive the gate (2 of 3). skill-letters additionally carries the
+  // weak alias «письмо», which still contributes BM25 weight and ranks it first.
+  const results = search(idx, "договор поставка письмо", { limit: 5 });
+  assert.deepEqual(results.map((r) => r.name), ["skill-letters", "skill-plain"]);
+  assert.ok(
+    results[0].score > results[1].score,
+    `weak alias must raise the score: ${results[0].score} vs ${results[1].score}`,
+  );
+});
