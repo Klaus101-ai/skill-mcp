@@ -60,22 +60,31 @@ or the project `opencode.json(c)`):
 
 ### 2. Plugin
 
-Either add the absolute path of the entry to the `plugins` array:
+Add the absolute path of the plugin **directory** to the `plugins` array:
 
 ```jsonc
 // ~/.config/opencode/opencode.json(c)  or  <project>/opencode.json(c)
 "plugins": [
-  "E:\\1_Products\\skill-router\\plugin\\skill-router-hint.ts"
+  "E:\\1_Products\\skill-router\\plugin"
 ]
 ```
 
-or copy it into `~/.config/opencode/plugins/` — **keeping the repository
-layout**: the entry imports `./hint.mjs`, and `plugin/hint.mjs` imports
-`../core/*`, so the copied `plugin/*` files must stay **next to a `core/`
-directory** (from `~/.config/opencode/plugins/` the relative `../core/*`
-resolves to `~/.config/opencode/core/`, so copy `core/` there as well —
-`plugin/skill-router.config.json` rides along in the same folder). A single
-copied `.ts` file will not work on its own.
+opencode loads a directory's `index`/`server` module — here
+`plugin/index.ts`, the same `{id, setup}` object as
+`plugin/skill-router-hint.ts`, assembled from `./hint.mjs`. A path to a
+single **file** in the `plugins` array is ignored: the loader drops it with
+the warning `configured plugin path must be a directory`
+(anomalyco/opencode#46551).
+
+Alternatively copy it into `~/.config/opencode/plugins/` — **keeping the
+repository layout**: the entry imports `./hint.mjs`, and `plugin/hint.mjs`
+imports `../core/*`, so the copied `plugin/*` files must stay **next to a
+`core/` directory** (from `~/.config/opencode/plugins/` the relative
+`../core/*` resolves to `~/.config/opencode/core/`, so copy `core/` there as
+well — `plugin/skill-router.config.json` rides along in the same folder). A
+single copied `.ts` file will not work on its own. Auto-discovery loads every
+`*.ts` in that folder, so copy **one** of `index.ts` / `skill-router-hint.ts`
+— both hold the same `id`.
 
 ### 3. Restart opencode
 
@@ -249,10 +258,12 @@ Restart opencode afterwards — config is loaded once at startup.
 
 ## Plugin (context hint)
 
-`plugin/skill-router-hint.ts` is an opencode **context-hook plugin**: right
-before each model dispatch (`context` hook — the agent loop, including
-tool-driven continuations) it appends **one text part** to the request's
-`system` array with at most **2** skill suggestions:
+`plugin/index.ts` — the directory entry point opencode loads (the same
+`{id, setup}` object is assembled in `plugin/skill-router-hint.ts`) — is an
+opencode **context-hook plugin**: right before each model dispatch
+(`context` hook — the agent loop, including tool-driven continuations) it
+appends **one text part** to the request's `system` array with at most **2**
+skill suggestions:
 
 ```text
 <skill_hint source="skill-router" note="подсказка, не загрузка: скилл не открыт">
@@ -282,31 +293,39 @@ by the 150 ms guard — the next dispatch hints normally.
 
 | File | Role |
 |---|---|
-| `plugin/skill-router-hint.ts` | loadable entry: `export default { id, setup }`, registers the `context` hook |
+| `plugin/index.ts` | directory entry point loaded by opencode: `export default { id, setup }`, registers the `context` hook (thin — imports only `./hint.mjs`) |
+| `plugin/skill-router-hint.ts` | the same plugin object as `index.ts`, kept as a standalone module (neither `.ts` imports the other `.ts`) |
 | `plugin/hint.mjs` | hook logic (plain ESM — shared with tests and the demo, no build step) |
 | `plugin/hint.d.mts` | local type declarations (the repo does **not** depend on `@opencode/plugin`) |
 | `plugin/skill-router.config.json` | deny/allow config, resolved **next to the plugin module** (`plugin/`) |
 
-Keep the repository layout: the entry imports `./hint.mjs`, which imports
-`../core/*` — a single copied `.ts` file will not work on its own.
+Keep the repository layout: the entry (`plugin/index.ts`) imports
+`./hint.mjs`, which imports `../core/*` — a single copied `.ts` file will not
+work on its own.
 
 ### Connect it in opencode
 
-Add one entry to the `plugins` array of your config and restart opencode
-(config is loaded once at startup):
+Add one entry — the plugin **directory** — to the `plugins` array of your
+config and restart opencode (config is loaded once at startup):
 
 ```jsonc
 // ~/.config/opencode/opencode.json(c)  or  <project>/opencode.json(c)
 "plugins": [
-  "/absolute/path/to/skill-router/plugin/skill-router-hint.ts"
+  "/absolute/path/to/skill-router/plugin"
 ]
 ```
+
+The loader resolves the directory to its `index`/`server` module — here
+`plugin/index.ts`. A path to a single file is ignored (`configured plugin
+path must be a directory`).
 
 Alternatively rely on plugin auto-discovery: opencode loads `*.ts`/`*.js` from
 `.opencode/plugins/` (project; documented) and from `~/.config/opencode/plugins/`
 (global directory; observed on a live install where `"plugins": []` still loads
 `skill-gate.ts`). In the auto-discovery route place the whole `plugin/` +
-`core/` pair, not just the entry file.
+`core/` pair, not just the entry file — and copy only **one** of `index.ts` /
+`skill-router-hint.ts`: auto-discovery loads every `*.ts` file there, and the
+two hold the same plugin `id`.
 
 This repository never registers the plugin by itself — connecting it is one
 explicit config line, an owner's action.
