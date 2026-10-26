@@ -1,0 +1,60 @@
+{"id":1,"query":"проверить бенефициаров ооо","qrels":["beneficial-owner-check"],"kind":"easy"}
+{"id":2,"query":"аудит товарных знаков","qrels":["portfolio"],"kind":"easy"}
+{"id":3,"query":"подборка новых приказов РКН","qrels":["reg-feed-watcher"],"kind":"easy"}
+{"id":4,"query":"какие скиллы ставить агенту","qrels":["using-agent-skills"],"kind":"easy"}
+{"id":5,"query":"возврат НДС по услугам","qrels":["vat-analysis"],"kind":"easy"}
+{"id":6,"query":"rag chat over docs","qrels":["rag-kit"],"kind":"easy"}
+{"id":7,"query":"three.js camera rig","qrels":["threejs-camera-controls-and-rigs"],"kind":"easy"}
+{"id":8,"query":"request code review","qrels":["requesting-code-review"],"kind":"easy"}
+{"id":9,"query":"gsap utils snap","qrels":["gsap-utils"],"kind":"easy"}
+{"id":10,"query":"define quality constraints","qrels":["constraint-driven-development"],"kind":"easy"}
+{"id":11,"query":"поменялся директор: обновить реестры и отчёты","qrels":["entity-compliance"],"kind":"easy"}
+{"id":12,"query":"собрать коммерческое предложение с нуля по продукту","qrels":["kp"],"kind":"easy"}
+{"id":13,"query":"проверить, где политика обработки ПДн устарела","qrels":["policy-monitor"],"kind":"easy"}
+{"id":14,"query":"подобрать тёплую палитру акцентов для панели","qrels":["color-expert"],"kind":"easy"}
+{"id":15,"query":"модерация вернула приложение - разобрать причины отказа","qrels":["rustore-release"],"kind":"easy"}
+{"id":16,"query":"prove the e2e suite ran before claiming done","qrels":["verification-before-completion"],"kind":"easy"}
+{"id":17,"query":"move our cron jobs onto a proper queue","qrels":["deprecation-and-migration"],"kind":"easy"}
+{"id":18,"query":"plan blog topics for our legal newsletter","qrels":["content-strategy"],"kind":"easy"}
+{"id":19,"query":"got an administrative fine notice - help appeal it","qrels":["administrative-appeal"],"kind":"easy"}
+{"id":20,"query":"check the errors the workflow validator reports","qrels":["n8n-validation-expert"],"kind":"easy"}
+{"id":21,"query":"Соберите быстрый бриф по спору с подрядчиком: текущая позиция, основные риски, последний ход и следующий дедлайн. Кратко, для встречи.","qrels":["matter-briefing"],"kind":"easy"}
+{"id":22,"query":"Инженеры прислали описание нестандартного индексатора. Оформите intake и решите, что выгоднее: патентовать или хранить в тайне.","qrels":["invention-intake"],"kind":"easy"}
+{"id":23,"query":"Нужна юридическая справка для руководства по налоговой позиции прошлого квартала. Оформите вступление, обоснование и выводы.","qrels":["legal-docs-ru"],"kind":"easy"}
+{"id":24,"query":"Советы по настройке кеша расходятся у источников. Стройте рекомендацию на официальной документации, с цитатами и ссылками в тексте.","qrels":["source-driven-development"],"kind":"easy"}
+{"id":25,"query":"Снимите рекламный ролик нашей страницы: покажите сайт в ноутбуке и телефоне. Закончится коротким клипом на полминуты.","qrels":["video-promo"],"kind":"easy"}
+{"id":26,"query":"Write a strategic briefing about our platform for the board: firm structure, every claim backed, no marketing fluff.","qrels":["kuznetsov"],"kind":"easy"}
+{"id":27,"query":"Hearing is next week: chart every element of the claim with the evidence for it and the weak spots side by side.","qrels":["claim-chart"],"kind":"easy"}
+{"id":28,"query":"Pull apart my sales email: tone, structure, where the promise lands. Grade it like a chief copy editor would and show where attention drops.","qrels":["copychief"],"kind":"easy"}
+{"id":29,"query":"Before release, inspect the checkout page in a real browser: console erorrs, failed calls and layout shifts.","qrels":["browser-testing-with-devtools"],"kind":"easy"}
+{"id":30,"query":"Take our scope question and evaluate it with a couple of specialist agents, then finish with a clear verdict.","qrels":["opc"],"kind":"easy"}
+{"id":31,"query":"Подрядчик бросил стройку на середине и заморозил аванс: разберите договор подряда и подготовьте проект искового заявления о возврате.","qrels":["construction-contract-review","claim-draft-civil"],"kind":"hard"}
+{"id":32,"query":"После вскрытия итогов заметили несоответствие в заявке лидера. Проверьте, не истёк ли срок обжалования, и подготовьте жалобу в ФАС.","qrels":["statute-of-limitations-check","fas-complaint-draft"],"kind":"hard"}
+{"id":33,"query":"Closing signed two days ago: collect every open post-closing item into one checklist, then send the deal team a digest of what remains.","qrels":["closing-checklist","deal-team-summary"],"kind":"hard"}
+{"id":34,"query":"Собираем внутренние правила работы с нейросетями: какие рамки допустимого задать сотрудникам и как врезать их в действующие распоряжения и приказы.","qrels":["policy-starter","handbook-updates"],"kind":"hard"}
+{"id":35,"query":"Booking flow silently drops users at step three. Cover it with real-browser end-to-end tests, then audit the flow for edge cases like timeouts and double submits.","qrels":["webapp-testing","edge-case-auditor"],"kind":"hard"}
+{"id":36,"query":"Our webhook workflow fails quietly overnight: add loud error branches per step, and pull the shared retry logic into a reusable subworkflow.","qrels":["n8n-error-handling","n8n-subworkflows"],"kind":"hard"}
+{"id":37,"query":"Все наши тексты должны звучать единым голосом: сначала зафиксируйте редакционную политику проекта, затем прогоните по ней свежие черновики без следов нейросети.","qrels":["redpolitika","plain-prose"],"kind":"hard"}
+{"id":38,"query":"Перепишите микротексты экрана оплаты: коротко, по-человечески, с вразумительными ошибками. В конце поставьте оценку готового текста по шкалам.","qrels":["ux-copy","ru-score"],"kind":"hard"}
+{"id":39,"query":"We are opening a public API for partners: settle interface and deprecation contracts first, then record the decisions as an ADR so future us remembers the why.","qrels":["api-and-interface-design","documentation-and-adrs"],"kind":"hard"}
+{"id":40,"query":"The team keeps stepping on shared branches: fix one commit-PR rhythm, and move the risky refactor into an isolated worktree before main touches it.","qrels":["git-workflow-and-versioning","using-git-worktrees"],"kind":"hard"}
+{"id":41,"query":"Боимся, что договор на сервисную поддержку сочтут трудовыми отношениями: проверьте признаки переквалификации и распишите, как оплачивать часы и сверхурочку.","qrels":["worker-classification","wage-hour-qa"],"kind":"hard"}
+{"id":42,"query":"Собираем обучающий набор из переписок с клиентами: проверьте на персональные данные и чужие авторские права, затем пропишите команде правила использования внешних ИИ при работе с набором.","qrels":["training-data-review","ai-usage-rules"],"kind":"hard"}
+{"id":43,"query":"Продаём квартиру с ипотекой прежних жильцов: разберите договор купли-продажи и параллельно раскопайте обременения и историю помещения.","qrels":["purchase-sale-review","encumbrance-analysis"],"kind":"hard"}
+{"id":44,"query":"Ключевой алгоритм готов к выходу в прод: сначала проверьте, не наступаем ли на чужие патенты, затем оформите заявку на регистрацию изобретения.","qrels":["fto-triage","rospatent-application"],"kind":"hard"}
+{"id":45,"query":"Feature brief is vague: run the full spec process, extract the essence with one focused interview at a time, then break the spec into an ordered task list.","qrels":["detailed-spec","planning-and-task-breakdown"],"kind":"hard"}
+{"id":46,"query":"Кто-то завёл домен почти под нашу марку: подготовьте письмо-требование, а на отказ - распишите сценарий спора через АДРД.","qrels":["cease-desist","domain-dispute"],"kind":"hard"}
+{"id":47,"query":"Rebuild our corporate site from the source materials and prepared layouts, and write the multi-page site texts: hero, services, about and contacts.","qrels":["business-website-skill","site-copywriting"],"kind":"hard"}
+{"id":48,"query":"Move the legacy HTML marketing page to a React codebase on Tailwind, section by section, without changing the delivered structure.","qrels":["html-to-react","tailwindcss"],"kind":"hard"}
+{"id":49,"query":"Add sign-in to the Next.js app: providers, email-password with a verification flow, done the proper way in BetterAuth.","qrels":["better-auth-best-practices","email-and-password-best-practices"],"kind":"hard"}
+{"id":50,"query":"Begin the authorized engagement: follow the bounty workflow, keep evidence discipline, and open the reverse-engineering pass on the in-scope binary.","qrels":["bugbounty","reverse-engineer-anything"],"kind":"hard"}
+{"id":51,"query":"Сколько соли класть в тесто на пиццу","qrels":[],"kind":"empty"}
+{"id":52,"query":"Как сохранить свежую зелень в морозилке","qrels":[],"kind":"empty"}
+{"id":53,"query":"Какой рюкзак выбрать для рыбалки","qrels":[],"kind":"empty"}
+{"id":54,"query":"Почему рассада томатов стоит и не растёт","qrels":[],"kind":"empty"}
+{"id":55,"query":"Как безопасно повесить зеркало в ванной","qrels":[],"kind":"empty"}
+{"id":56,"query":"Когда пора пересаживать орхидею в другой горшок","qrels":[],"kind":"empty"}
+{"id":57,"query":"Найди сериал про шахматы на вечер пятницы","qrels":[],"kind":"empty"}
+{"id":58,"query":"Book a table for six at a Korean place on Saturday","qrels":[],"kind":"empty"}
+{"id":59,"query":"Advise running shoes for rainy morning runs","qrels":[],"kind":"empty"}
+{"id":60,"query":"Как правильно запекать лосося в духовке","qrels":[],"kind":"empty"}
