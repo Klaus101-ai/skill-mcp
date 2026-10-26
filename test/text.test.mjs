@@ -16,7 +16,6 @@ import {
   processTerm,
   significantQueryTokens,
   isShortAcronym,
-  withinOneEdit,
 } from "../core/text.mjs";
 
 test("tokenize: letters and digits are tokens, everything else separates", () => {
@@ -178,41 +177,4 @@ test("M7 stop list: when/what/should count as significant zero, subject words do
     assert.equal(significantQueryTokens(w).length, 1, `${w} must stay significant`);
     assert.ok(!STOP_WORDS.has(normalizeTerm(w)), `${w} must not be a stop word`);
   }
-});
-
-// ── M9: withinOneEdit — the one-typo predicate behind the typo tolerance ────
-
-test("M9 withinOneEdit: equality, one insertion, one deletion, one substitution", () => {
-  assert.equal(withinOneEdit("договор", "договор"), true, "identical strings are at distance 0");
-  // one INSERTION: «договр» -> «договор» (the M9 acceptance example)
-  assert.equal(withinOneEdit("договр", "договор"), true);
-  // one DELETION: the same pair, other direction
-  assert.equal(withinOneEdit("договор", "договр"), true);
-  // RU typo of the corpus word «налогообложения» (stem «налогообложен»):
-  // one inserted letter «о» — one edit, both directions
-  assert.equal(withinOneEdit("налогобложен", "налогообложен"), true);
-  assert.equal(withinOneEdit("налогообложен", "налогобложен"), true);
-  assert.equal(withinOneEdit("hotel", "hoter"), true, "EN single substitution (5 chars; the caller gates by length)");
-});
-
-test("M9 withinOneEdit: two edits are refused", () => {
-  // substitution + substitution (a transposition costs 2 in Levenshtein)
-  assert.equal(withinOneEdit("wrokflow", "workflow"), false);
-  // substitution + insertion
-  assert.equal(withinOneEdit("договорик", "договор"), false, "«ик» past «договор» is two edits");
-  // a transposed/reordered pair is two edits, never one
-  assert.equal(withinOneEdit("wrkflwo", "workflow"), false);
-  assert.equal(withinOneEdit("борщ", "компот"), false, "different words are not one edit apart");
-  assert.equal(withinOneEdit("abc", "xyz"), false, "three substitutions");
-});
-
-test("M9 withinOneEdit: length difference beyond one is refused immediately", () => {
-  assert.equal(withinOneEdit("abc", "abcd"), true, "one trailing character");
-  assert.equal(withinOneEdit("abcd", "abc"), true, "one missing character");
-  assert.equal(withinOneEdit("abc", "abcde"), false, "two characters apart");
-  assert.equal(withinOneEdit("", "a"), true, "empty vs one char");
-  assert.equal(withinOneEdit("", "ab"), false, "empty vs two chars");
-  assert.equal(withinOneEdit("", ""), true);
-  // insertion at the START is still one edit
-  assert.equal(withinOneEdit("логовор", "договор"), true, "first-character substitution is one edit (the bucket index, not this predicate, drops it)");
 });

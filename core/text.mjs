@@ -190,48 +190,6 @@ export function processTerm(term) {
 }
 
 /**
- * Are `a` and `b` at Levenshtein distance EXACTLY <= 1 (one insertion,
- * deletion or substitution — M9 typo tolerance)? Runs in O(|a|+|b|) with an
- * early exit and never computes a matrix: the moment a second difference
- * shows up, the answer is false. Used only for tokens of length
- * >= MIN_TYPO_LENGTH (see core/index.mjs), so "сайта"/"сайт" (5 chars) is
- * never rescued by this function and a query needs at most ONE typo —
- * distance 2 ("wrokflow" vs "workflow") is refused.
- *
- * Strings of different length are compared as "long" and "short": a single
- * extra character may remain at either end (insertion/deletion), everything
- * else must align.
- */
-export function withinOneEdit(a, b) {
-  const s = String(a ?? "");
-  const t = String(b ?? "");
-  if (s === t) return true;
-  const ls = s.length;
-  const lt = t.length;
-  if (Math.abs(ls - lt) > 1) return false;
-  let i = 0;
-  let j = 0;
-  let edits = 0;
-  while (i < ls && j < lt) {
-    if (s[i] === t[j]) {
-      i += 1;
-      j += 1;
-      continue;
-    }
-    edits += 1;
-    if (edits > 1) return false;
-    if (ls > lt) i += 1; // skip a character of the longer string (deletion)
-    else if (lt > ls) j += 1;
-    else {
-      i += 1;
-      j += 1; // substitution: advance both
-    }
-  }
-  edits += ls - i + (lt - j);
-  return edits <= 1;
-}
-
-/**
  * Meaningful tokens of a query for the AC3 gate, normalized + stemmed,
  * deduplicated, order preserved. A token is meaningful when its normalized
  * form is >= MIN_TOKEN_LENGTH chars and is not a stop word — or when the
