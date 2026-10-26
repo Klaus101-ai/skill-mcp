@@ -1,4 +1,6 @@
-# skill-router
+# skill-mcp
+
+Repository name: skill-mcp. The plugin id is `skill-router-hint`, the config file is `plugin/skill-router.config.json`, and the package name is `skill-router` — these internal identifiers are unchanged.
 
 Local skill search and ranking for [opencode](https://opencode.ai). Indexes
 `SKILL.md` files (frontmatter `name`, `description`, body headings) and answers
