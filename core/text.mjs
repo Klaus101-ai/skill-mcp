@@ -26,8 +26,21 @@
 // ML, UI …). The gate keeps a result only when at least one such token of
 // the query (after normalization/stemming) is EQUAL to a token of the skill
 // text — never a substring of a longer word.
+//
+// CJK / SE-ASIAN RUNS (multilingual search): Han/Kana/Hangul/Thai/Lao/Khmer/
+// Myanmar are written WITHOUT spaces, so the plain split would turn a whole
+// phrase into ONE token («做原型») that only matches the same unbroken string —
+// and the 3-char threshold would additionally drop two-character words. Each
+// such run is cut out and tokenized on its own: word segments from
+// Intl.Segmenter (script locale) when the runtime has it, UNION character
+// bigrams over the run — the unsegmented run itself is never emitted. Latin
+// and Cyrillic keep the ORIGINAL split; `normalizeTerm` keeps CJK (those
+// characters are letters). See the CJK section above `tokenize`.
 
-/** Minimum length of a *meaningful* query token (spec M5, AC3 gate). */
+/** Minimum length of a *meaningful* query token (spec M5, AC3 gate).
+ * CJK / SE-Asian tokens are EXEMPT from this threshold: a two-character word
+ * (网站, 投标) is a whole word and must be able to prove a match; a SINGLE
+ * character of those scripts is never meaningful (see significantQueryTokens). */
 export const MIN_TOKEN_LENGTH = 3;
 
 /**
@@ -133,6 +146,119 @@ const RU_SUFFIXES = [
 ].sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0));
 const EN_SUFFIXES = ["ing", "es", "ed", "s"]; // longest first: ing(3) > es/ed(2) > s(1)
 
+// ── CJK / South-East Asian runs (script-aware segmentation) ────────────────
+// Scripts that write words WITHOUT spaces: Han, Hiragana, Katakana, Hangul,
+// Thai, Lao, Khmer, Myanmar. One run = one token under the plain split
+// («网站» matched only as a whole «网站», «做原型» only as «做原型»), so every
+// run is pulled out of the text and tokenized on its own rules:
+//
+//   word segments from Intl.Segmenter (granularity "word", script locale)
+//   UNION character bigrams over the whole run. The union covers both sides
+//   of a match: dictionary segments line up when both sides segment the same
+//   way (投标, 网站), bigrams line up when they do not («高保真» is segmented
+//   «高保»|«真», but its bigrams «高保»/«保真» are stable on both sides).
+//   Per-segment bigrams are a SUBSET of the run's bigrams (a segment is a
+//   contiguous slice of the run), so emitting run bigrams covers them too.
+//   The unsegmented run itself is never emitted as one token — except the
+//   degenerate 1–2 character runs, where any bigram rule output IS the run
+//   («招商» → its only bigram «招商»; that is what lets a two-character
+//   query word exist at all when the dictionary splits it into single
+//   characters — on this host: 招商 → «招»|«商»).
+//
+// Intl.Segmenter missing (small-ICU runtime) → the same bigrams over the run
+// are the ENTIRE fallback: the search keeps working, only dictionary precision
+// is lost. Locale per run: ja when the run carries Kana, ko for Hangul,
+// th/lo/km/my for their own scripts, otherwise zh for a pure-Han run.
+// Latin/Cyrillic are untouched: `tokenize` only peels CJK runs off and runs
+// the ORIGINAL split over everything else (dot inside a word, hyphen as a
+// separator — both unchanged).
+
+/** One character of a runless script (CJK / SE-Asian) — detection only (/g not set: `.test` stays stateless). */
+const CJK_CHAR_RE =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+
+/** A greedy run of the same characters (global — used via matchAll). */
+const CJK_RUN_RE =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]+/gu;
+
+/** Does `token` contain any CJK / SE-Asian character? */
+export function isCjkToken(token) {
+  return CJK_CHAR_RE.test(String(token ?? ""));
+}
+
+/** locale -> cached Intl.Segmenter, `null` cached for "cannot build one". */
+const SEGMENTER_CACHE = new Map();
+
+/** Script locale of a run: Kana wins (Japanese), then Hangul, Thai, Lao, Khmer, Myanmar; a pure-Han run → zh. */
+function localeForRun(run) {
+  if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(run)) return "ja";
+  if (/[\p{Script=Hangul}]/u.test(run)) return "ko";
+  if (/[\p{Script=Thai}]/u.test(run)) return "th";
+  if (/[\p{Script=Lao}]/u.test(run)) return "lo";
+  if (/[\p{Script=Khmer}]/u.test(run)) return "km";
+  if (/[\p{Script=Myanmar}]/u.test(run)) return "my";
+  return "zh";
+}
+
+/**
+ * Word segments of one run, or null when Intl.Segmenter is unavailable or
+ * refuses to build — the caller then falls back to bigrams only. The
+ * AVAILABILITY is checked on every call (so a runtime without the segmenter —
+ * and the test that unpicks it — never sees a stale cache entry); only the
+ * construction itself is cached per locale.
+ */
+function segmentRun(run) {
+  if (typeof Intl === "undefined" || typeof Intl.Segmenter !== "function") return null;
+  const locale = localeForRun(run);
+  let segmenter = SEGMENTER_CACHE.get(locale);
+  if (segmenter === undefined) {
+    try {
+      segmenter = new Intl.Segmenter(locale, { granularity: "word" });
+    } catch {
+      segmenter = null;
+    }
+    SEGMENTER_CACHE.set(locale, segmenter);
+  }
+  if (segmenter === null) return null;
+  try {
+    const parts = [];
+    for (const { segment } of segmenter.segment(run)) {
+      if (segment !== "") parts.push(segment);
+    }
+    return parts;
+  } catch {
+    return null; // a segmenting failure must degrade to bigrams, never throw
+  }
+}
+
+/**
+ * Tokenize one CJK/SE-Asian run: dictionary segments (when available) UNION
+ * character bigrams over the whole run, deduplicated, order preserved. The
+ * raw run is never emitted as a single token.
+ */
+function emitCjkRun(out, run, seen) {
+  const emit = (t) => {
+    if (t === "" || seen.has(t)) return; // dedupe: one occurrence per run set
+    seen.add(t);
+    out.push(t);
+  };
+  const segments = segmentRun(run);
+  if (segments) for (const seg of segments) emit(seg); // the word itself
+  if (run.length === 1) {
+    emit(run); // a lone character: nothing to pair it with (never significant)
+    return;
+  }
+  for (let i = 0; i + 1 < run.length; i += 1) emit(run.slice(i, i + 2)); // bigrams
+}
+
+/** The ORIGINAL split rule over a non-CJK piece: dot inside a word, everything else separates. */
+function pushPlainWords(out, piece) {
+  if (piece === "") return;
+  for (const t of piece.split(/[^\p{L}\p{N}.]+/u)) {
+    if (t !== "" && /[\p{L}\p{N}]/u.test(t)) out.push(t);
+  }
+}
+
 /**
  * Split text into WORDS (M6: token-level match): runs of letters and digits
  * are words, a dot stays INSIDE a word (`next.js` is one word — its parts
@@ -141,11 +267,26 @@ const EN_SUFFIXES = ["ing", "es", "ed", "s"]; // longest first: ing(3) > es/ed(2
  * letter/digit at all (`...`) are dropped. Hyphens stay separators: they
  * join independent words (`gsap-scrolltrigger`, `next-steps`) and are the
  * boundary in mixed-script compounds (`AI-документ`).
+ *
+ * Script-aware part (multilingual): every Han/Kana/Hangul/Thai/Lao/Khmer/
+ * Myanmar run is removed FIRST and expanded into segments + bigrams (see the
+ * CJK section above), so `HTML原型` yields `HTML` + the CJK tokens instead of
+ * one mixed token, and a space-less CJK phrase yields words. Everything
+ * outside those runs goes through the original split unchanged; CJK tokens
+ * are deduplicated, Latin/Cyrillic keep their natural multiplicity.
  */
 export function tokenize(text) {
-  return String(text ?? "")
-    .split(/[^\p{L}\p{N}.]+/u)
-    .filter((t) => t !== "" && /[\p{L}\p{N}]/u.test(t));
+  const s = String(text ?? "");
+  const out = [];
+  const seenCjk = new Set();
+  let last = 0;
+  for (const m of s.matchAll(CJK_RUN_RE)) {
+    pushPlainWords(out, s.slice(last, m.index));
+    emitCjkRun(out, m[0], seenCjk);
+    last = m.index + m[0].length;
+  }
+  pushPlainWords(out, s.slice(last));
+  return out;
 }
 
 /** lowercase, ё -> е, drop any punctuation/symbol residue ("" for junk). */
@@ -219,6 +360,13 @@ export function processTerm(term) {
  * significant either way.
  * Returns [] when nothing meaningful is left — such a query cannot be
  * proven by any skill text and must yield [].
+ *
+ * CJK / SE-Asian exception (multilingual): the MIN_TOKEN_LENGTH = 3 rule does
+ * not apply to those tokens — a two-character word (网站, 投标, 原型) is a real
+ * word and may prove a match — but a SINGLE character of those scripts is
+ * never significant («网» alone proves nothing, exactly like «и»). The stop
+ * list and the stemmer still run unchanged; neither can touch a CJK token
+ * (RU/EN endings are a different alphabet), so stem === norm there.
  */
 export function significantQueryTokens(text) {
   const seen = new Set();
@@ -226,10 +374,17 @@ export function significantQueryTokens(text) {
   for (const raw of tokenize(text)) {
     const acronym = isShortAcronym(raw);
     const norm = normalizeTerm(raw);
-    if (!acronym && norm.length < MIN_TOKEN_LENGTH) continue;
+    const cjk = isCjkToken(norm);
+    if (cjk) {
+      // CJK/SE-Asian: exempt from the 3-char threshold, gated on ≥ 2 chars
+      // instead — one lone character (网, 作, ส) is not meaningful.
+      if (norm.length < 2) continue;
+    } else {
+      if (!acronym && norm.length < MIN_TOKEN_LENGTH) continue;
+    }
     if (!acronym && STOP_WORDS.has(norm)) continue;
     const stem = stemTerm(norm);
-    if (!acronym && stem.length < MIN_TOKEN_LENGTH) continue;
+    if (!cjk && !acronym && stem.length < MIN_TOKEN_LENGTH) continue;
     if (seen.has(stem)) continue;
     seen.add(stem);
     out.push(stem);

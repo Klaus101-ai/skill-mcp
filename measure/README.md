@@ -512,6 +512,89 @@ index is warmed once and the 60 held-out queries are timed twice — search only
 «зачем» + block). p50/p95/max are nearest-rank percentiles. `env` is passed as
 `{}` so the hint is ON regardless of the shell.
 
+## Hint metrics (`hint.mjs`)
+
+`node measure/hint.mjs [--set <path>] [--json]` measures the **hint** — what
+the model actually sees — through the same `createContextHook` path the
+plugin uses (`env` is passed as `{}` so the hint is ON; one hook per run,
+index built once and warmed, the cold first call excluded on purpose).
+
+Since **v0.4** (owner decision 26.10.2026, «5 кандидатов») the block holds up
+to **5 candidates** (confident first, `confident:false` entries marked
+«(возможно)»); the harness strips the marker when it reads entry names.
+Metrics per kind (`easy` / `hard` / `empty`):
+
+- **formed** — a `<skill_hint>` block was appended for that query;
+- **hit@2** — an ethalon qrel sits inside the block's **first two entries**
+  (the pre-v0.4 metric, kept for continuity; eligible queries only);
+- **hit@5** — an ethalon qrel sits **anywhere inside the block** (≤5 entries)
+  — the hint's own recall@5;
+- **junk** — a block formed on an `empty` query. Under v0.4 AC3 is
+  **«кандидаты, не утверждение»**: a junk block shows marked candidate
+  material, not an asserted answer, so this counts options shown, not claims.
+
+Measured 26.10.2026 on the fixed sets (365 skills):
+
+| set | easy formed | easy hit@2 | easy hit@5 | hard formed | hard hit@2 | hard hit@5 | junk |
+|---|---|---|---|---|---|---|---|
+| A | 35/35 (100%) | 26/35 = 0.7429 | 27/35 = 0.7714 | 15/15 (100%) | 9/15 = 0.6000 | 11/15 = 0.7333 | 9/10 |
+| B | 30/30 (100%) | 24/30 = 0.8000 | 26/30 = 0.8667 | 20/20 (100%) | 14/20 = 0.7000 | 15/20 = 0.7500 | 10/10 |
+| C | 30/30 (100%) | 17/30 = 0.5667 | 20/30 = 0.6667 | 20/20 (100%) | 17/20 = 0.8500 | 18/20 = 0.9000 | 10/10 |
+
+History (v0.3, ≤2 confident-only entries, same sets/commands): A formed
+34/35 & 15/15, hit@2 0.7429 & 0.6000, junk 0/10; B 27/30 & 20/20, hit@2
+0.7333 & 0.7000, junk 3/10; C 29/30 & 20/20, hit@2 0.5333 & 0.8500, junk
+1/10. The v0.4 deltas are structural, not a ranking change: blocks now form
+whenever raw hits exist (formed → 100%, junk ↑), hit@2 barely moved (newly
+formed blocks add hits), and hit@5 is the new, wider figure.
+
+## v0.4.1 § Variant G (expansion + domain boost + two silence rules)
+
+Owner decision 26.10.2026 (variants lab `product-skill-router-variants-20261026`,
+variant **G**): the product ports the lab's G behaviour verbatim.
+
+What changed:
+
+1. **Query expansion, inside `core/index.mjs` `search()`** — a query
+   containing «описан…» appends «текст», a query containing «продукт…»
+   appends « product». The significant tokens, the `confident` coverage rule
+   and the `why` line all run on the EXPANDED query (`expandQuery`, exported).
+2. **Domain boost, after the cap in `search()`** — when the ORIGINAL query
+   matches `BOOST_TRIGGER` = `/(описан|текст|лендинг|копирайт|продукт)/iu`,
+   the already-capped pool is reordered: `BOOST_ORDER` = **promo,
+   copywriting, site-copywriting, app-copywriting, documentation-and-adrs,
+   redpolitika** rise to the top (in that order), the rest keep their relative
+   order (`boostReorder`, exported). The boost only REORDERS — a domain skill
+   that did not make the top-`limit` pool is never added. The name list is
+   **hardcoded** (owner-open question, README § Known limitations).
+3. **Tool-silence, in `plugin/hint.mjs`** — a complaint about the tool itself
+   (`TOOL_RX` = `плагин|skill-router|skill-mcp|mcp` AND `QUIET_RX` =
+   `почему|не нашел|не нашёл|не активировал|не работает`) produces NO block.
+4. **Confident gate, in `plugin/hint.mjs`** — if the pool (search's top-10)
+   holds no `confident:true` position, the hint does not build a block at all;
+   unconfirmed candidates may appear only behind a proven one, still marked
+   «(возможно)».
+5. **MCP `find` default limit 10** (max stays 10), `description` + `note`
+   per the v0.4 contract unchanged.
+
+Measured 26.10.2026 on the fixed sets (365 skills), `node measure/hint.mjs`
+(the actual run of this build — recorded as measured, nothing adjusted):
+
+| set | easy hit@5 | hard hit@5 | hit@5 total (eligible) | junk (empty) | find@10 (eligible) |
+|---|---|---|---|---|---|
+| A | 27/35 = 0.7714 | 11/15 = 0.7333 | **38/50** | **0/10** | **43/50 = 86.0%** |
+| B | 24/30 = 0.8000 | 15/20 = 0.7500 | **39/50** | **3/10** | **44/50 = 88.0%** |
+| C | 20/30 = 0.6667 | 18/20 = 0.9000 | **38/50** | **1/10** | **42/50 = 84.0%** |
+
+G expectations from the lab (variants-report, variant G): hit@5 A/B/C =
+**38/39/38**, junk = **0/10, 3/10, 1/10**, find@10 = **43/44/42**, Q1 block
+≈835 chars / ~202 tokens (estimate: Cyrillic/3 + Latin/4), Q2 silent, Q3
+promo at position 1 — all four match this build's run above. `node
+measure/run.mjs` (recall@5/NDCG@10) now flows through the same
+expanded+boosted `search()`, so its numbers may move versus v0.4.0 — the run
+output is the source of truth for this version (recorded in the writer
+report of task `product-skill-router-g-20261026`).
+
 ## Reproduce
 
 ```sh
@@ -521,6 +604,7 @@ node measure/run.mjs      # human table (product vs baseline, by kind + AC3)
 node measure/run.mjs --json  # same numbers, machine-readable, incl. per-query tops
 node measure/run.mjs --set measure/heldout-b.jsonl  # same metrics on set B (acceptance, M8)
 node measure/run.mjs --set measure/heldout-c.jsonl  # same metrics on set C (acceptance, final)
+node measure/hint.mjs     # hint metrics on A/B/C: formed / hit@2 / hit@5 / junk (--json available)
 node measure/weights.mjs  # field-weight candidates on set A (M5)
 node measure/latency.mjs  # p50/p95/max + first-call (index build)
 node measure/baseline.mjs --k 5 --verbose   # standalone baseline on the draft set

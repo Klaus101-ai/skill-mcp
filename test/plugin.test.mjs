@@ -1,4 +1,4 @@
-// Tests for the skill-router context hint hook (spec §7, R1–R6).
+// Tests for the skill-mcp context hint hook (spec §7, R1–R6).
 // Plain node:test — the hook is called with a fake context event, no live
 // opencode and no plugin registration required.
 import test from "node:test";
@@ -11,9 +11,12 @@ import {
   createContextHook,
   buildHintBlock,
   isHintOff,
+  isToolSilent,
   HINT_TAG,
   HINT_NOTE,
+  MAX_ITEMS,
   MAX_BLOCK_CHARS,
+  BUDGET_MS,
 } from "../plugin/hint.mjs";
 import { discoverSkills } from "../core/sources.mjs";
 
@@ -32,7 +35,20 @@ function makeEvent(text, { agent = "tester" } = {}) {
 }
 
 function newHook(overrides = {}) {
-  return createContextHook({ env: {}, roots: [FIX_ROOT], debug: false, ...overrides });
+  // v0.6.3: the preload (content part) is ON by default in production; the
+  // hint-shape tests below assert the one-part shape, so they run with
+  // `SKILL_MCP_PRELOAD=off`. A test re-enables it by passing its own env —
+  // the maps are MERGED, an override never loses the off-by-default switch.
+  // Phase 1a (28.10.2026): the hint-shape tests also run with the always-on
+  // router rule OFF (`SKILL_MCP_RULE=off`) — the rule's own behaviour is
+  // covered by test/router-rule.test.mjs (order, idempotency, switches).
+  const { env, ...rest } = overrides;
+  return createContextHook({
+    env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off", ...(env ?? {}) },
+    roots: [FIX_ROOT],
+    debug: false,
+    ...rest,
+  });
 }
 
 function entryLines(block) {
@@ -40,14 +56,14 @@ function entryLines(block) {
 }
 
 function entryNames(block) {
-  return entryLines(block).map((l) => l.slice(2).split(":")[0]);
+  return entryLines(block).map((l) => l.slice(2).replace(" (возможно)", "").split(":")[0]);
 }
 
-const HINT_TAG_LITERAL = '<skill_hint source="skill-router" note="подсказка, не загрузка: скилл не открыт">';
+const HINT_TAG_LITERAL = '<skill_hint source="skill-mcp" note="посмотри описания кандидатов; если один подходит — загрузи его через skill; если нет — не загружай.">';
 
-// ── формат блока (R1, R6) ───────────────────────────────────────────────────
+// ── формат блока (R1, R6, v0.4) ────────────────────────────────────────────
 
-test("format: one text part, exact note, <=2 entries, <=1000 chars", () => {
+test("format: one text part, exact note, <=5 entries, <=1000 chars", () => {
   const ev = makeEvent("zebra operations");
   newHook()(ev);
   assert.equal(ev.system.length, 2, "exactly one part appended");
@@ -58,25 +74,28 @@ test("format: one text part, exact note, <=2 entries, <=1000 chars", () => {
   // R1 verbatim: the note attribute is exact, the tag matches spec §7.
   assert.equal(block.split("\n")[0], HINT_TAG);
   assert.equal(HINT_TAG, HINT_TAG_LITERAL);
-  assert.equal(HINT_NOTE, "подсказка, не загрузка: скилл не открыт");
+  assert.equal(HINT_NOTE, "посмотри описания кандидатов; если один подходит — загрузи его через skill; если нет — не загружай.");
   assert.equal(block.split("\n").at(-1), "</skill_hint>");
   assert.equal(block.split("<skill_hint").length - 1, 1, "single opening tag");
   assert.equal(block.split("</skill_hint>").length - 1, 1, "single closing tag");
 
   const entries = entryLines(block);
-  assert.ok(entries.length >= 1 && entries.length <= 2, `entries: ${entries.length}`);
+  assert.ok(entries.length >= 1 && entries.length <= MAX_ITEMS, `entries: ${entries.length}`);
+  assert.equal(MAX_ITEMS, 5, "v0.4: up to 5 candidates");
   assert.ok(block.length <= MAX_BLOCK_CHARS, `block ${block.length} chars`);
   assert.ok(block.length <= 1000);
   for (const line of entries) {
-    const m = /^- (skill-[a-z]+): ([^;\n]+); открыть: инструмент skill, name=(skill-[a-z]+)$/.exec(line);
+    const m = /^- (skill-[a-z]+)( \(возможно\))?: ([^;\n]+); открыть: инструмент skill, name=(skill-[a-z]+)$/.exec(line);
     assert.ok(m, `bad entry line: ${line}`);
-    assert.equal(m[1], m[3], "name repeats in the open instruction");
-    assert.ok(m[2].length <= 200, "why line ≤200 chars");
+    assert.equal(m[1], m[4], "name repeats in the open instruction");
+    assert.ok(m[3].length <= 120, "why line ≤120 chars");
   }
   for (const name of entryNames(block)) {
     assert.ok(["skill-delta", "skill-omega"].includes(name), `unexpected skill ${name}`);
   }
-  assert.equal(entries.length, 2, "zebra matches both delta and omega — cap holds at 2");
+  // «zebra operations» (N=2) is covered by both delta and omega → both confident.
+  assert.equal(entries.length, 2, "both zebra skills are confident candidates");
+  assert.ok(!block.includes("(возможно)"), "confident candidates carry no marker");
 });
 
 test("buildHintBlock: empty input → empty block", () => {
@@ -123,12 +142,12 @@ test("no hint: empty, whitespace, punctuation-only, digits-only, no user message
 
 // ── выключение env (AC7, R6) ────────────────────────────────────────────────
 
-test("SKILL_ROUTER_HINT=off|0|false → no hint (any case)", () => {
+test("SKILL_MCP_HINT=off|0|false → no hint (any case)", () => {
   for (const value of ["off", "0", "false", "OFF", " False "]) {
     const ev = makeEvent("zebra operations");
     const before = structuredClone(ev.system);
-    newHook({ env: { SKILL_ROUTER_HINT: value } })(ev);
-    assert.deepEqual(ev.system, before, `SKILL_ROUTER_HINT=${JSON.stringify(value)} must disable`);
+    newHook({ env: { SKILL_MCP_HINT: value } })(ev);
+    assert.deepEqual(ev.system, before, `SKILL_MCP_HINT=${JSON.stringify(value)} must disable`);
   }
   assert.equal(isHintOff("off"), true);
   assert.equal(isHintOff("0"), true);
@@ -136,8 +155,54 @@ test("SKILL_ROUTER_HINT=off|0|false → no hint (any case)", () => {
   assert.equal(isHintOff("on"), false);
   assert.equal(isHintOff(undefined), false);
   const on = makeEvent("zebra operations");
-  newHook({ env: { SKILL_ROUTER_HINT: "on" } })(on);
+  newHook({ env: { SKILL_MCP_HINT: "on" } })(on);
   assert.equal(on.system.length, 2, "any other value keeps the hint enabled");
+});
+
+// ── v0.5.0: env-имена переименованы; старые работают как fallback ───────────
+
+test("v0.5.0 env: legacy SKILL_ROUTER_HINT still disables as a fallback (deprecated)", () => {
+  for (const value of ["off", "0", "false"]) {
+    const ev = makeEvent("zebra operations");
+    const before = structuredClone(ev.system);
+    newHook({ env: { SKILL_ROUTER_HINT: value } })(ev);
+    assert.deepEqual(ev.system, before, `legacy SKILL_ROUTER_HINT=${JSON.stringify(value)} must still disable`);
+  }
+  const on = makeEvent("zebra operations");
+  newHook({ env: { SKILL_ROUTER_HINT: "on" } })(on);
+  assert.equal(on.system.length, 2, "a legacy value that is not off keeps the hint");
+});
+
+test("v0.5.0 env: when both are set, SKILL_MCP_HINT wins over legacy SKILL_ROUTER_HINT", () => {
+  const disabled = makeEvent("zebra operations");
+  const beforeDisabled = structuredClone(disabled.system);
+  newHook({ env: { SKILL_MCP_HINT: "off", SKILL_ROUTER_HINT: "on" } })(disabled);
+  assert.deepEqual(disabled.system, beforeDisabled, "new=off beats legacy=on");
+
+  const enabled = makeEvent("zebra operations");
+  newHook({ env: { SKILL_MCP_HINT: "on", SKILL_ROUTER_HINT: "off" } })(enabled);
+  assert.equal(enabled.system.length, 2, "new=on beats legacy=off");
+});
+
+test("v0.5.0 env: SKILL_MCP_DEBUG=1 → stderr diagnostics; legacy fallback; new wins", () => {
+  const chunks = [];
+  const origWrite = process.stderr.write;
+  process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
+  const failingSearch = () => { throw new Error("boom"); };
+  try {
+    createContextHook({ env: { SKILL_MCP_DEBUG: "1" }, roots: [FIX_ROOT], debug: undefined, search: failingSearch })(makeEvent("zebra operations"));
+    assert.ok(chunks.some((c) => c.includes("[skill-mcp]") && c.includes("fail-open")), "new name enables debug");
+
+    chunks.length = 0;
+    createContextHook({ env: { SKILL_ROUTER_DEBUG: "1" }, roots: [FIX_ROOT], debug: undefined, search: failingSearch })(makeEvent("zebra operations"));
+    assert.ok(chunks.some((c) => c.includes("[skill-mcp]") && c.includes("fail-open")), "legacy name still enables debug (fallback)");
+
+    chunks.length = 0;
+    createContextHook({ env: { SKILL_MCP_DEBUG: "0", SKILL_ROUTER_DEBUG: "1" }, roots: [FIX_ROOT], debug: undefined, search: failingSearch })(makeEvent("zebra operations"));
+    assert.ok(!chunks.some((c) => c.includes("fail-open")), "new name set (not \"1\") beats legacy=1");
+  } finally {
+    process.stderr.write = origWrite;
+  }
 });
 
 // ── deny / allow по агенту (R2) ─────────────────────────────────────────────
@@ -160,7 +225,8 @@ test("deny for an agent does not affect other agents (default = hint all)", () =
   const other = makeEvent("banana zebra manual", { agent: "other-agent" });
   newHook({ config })(other);
   assert.equal(other.system.length, 2, "unconfigured agent keeps the default");
-  assert.equal(entryNames(other.system[1].text).length, 2);
+  // v0.4: all 3 raw matches are candidates (beta is marked «(возможно)»).
+  assert.equal(entryNames(other.system[1].text).length, 3);
 });
 
 test("allow: only listed skills are hinted; agent without allow is unrestricted", () => {
@@ -171,12 +237,18 @@ test("allow: only listed skills are hinted; agent without allow is unrestricted"
   assert.equal(tester.system.length, 2);
   assert.deepEqual(entryNames(tester.system[1].text), ["skill-beta"]);
 
-  // M7 coverage: of «banana zebra manual» (N=3) skill-beta covers only
-  // «banana» — one token proves nothing — so only the two skills covering
-  // «zebra»+«manual» remain, and the default (no allow) hints those two.
+  // v0.4: «banana zebra manual» (N=3) — skill-beta covers only «banana»
+  // (confident:false → candidate marked «(возможно)»), delta/omega cover
+  // «zebra»+«manual» (confident, first); the default (no allow) hints all
+  // three candidates, confident first.
   const other = makeEvent("banana zebra manual", { agent: "other-agent" });
   newHook({ config })(other);
-  assert.equal(entryNames(other.system[1].text).length, 2, "2 of the 3 matches pass the coverage rule");
+  assert.deepEqual(
+    entryNames(other.system[1].text),
+    ["skill-delta", "skill-omega", "skill-beta"],
+    "confident candidates first, the unconfirmed one last (v0.4)",
+  );
+  assert.ok(other.system[1].text.includes("skill-beta (возможно)"), "unconfirmed candidate is marked");
 });
 
 // ── fail-open (R6) ──────────────────────────────────────────────────────────
@@ -251,8 +323,9 @@ test("block never claims a skill is loaded/opened (except the mandated note + op
   assert.ok(!/загружен/i.test(scrubbed), "no «загружен»");
   assert.ok(!/открыт/i.test(scrubbed), "no «открыт» outside the note");
   assert.ok(!/loaded/i.test(scrubbed), "no «loaded»");
-  // The note itself is verbatim and claims the opposite:
-  assert.ok(block.includes('note="подсказка, не загрузка: скилл не открыт"'));
+  // The note itself is verbatim: it INSTRUCTS the load (v0.6.2) but never
+  // claims that a skill has been loaded/opened:
+  assert.ok(block.includes('note="посмотри описания кандидатов; если один подходит — загрузи его через skill; если нет — не загружай."'));
 });
 
 // ── кэш индекса и бюджет времени ────────────────────────────────────────────
@@ -294,7 +367,7 @@ test("missing config file → default behaviour, hint still works", () => {
 });
 
 test("malformed config file → defaults + debug line, hint still works", () => {
-  const tmp = path.join(os.tmpdir(), `skill-router-test-${process.pid}.config.json`);
+  const tmp = path.join(os.tmpdir(), `skill-mcp-test-${process.pid}.config.json`);
   fs.writeFileSync(tmp, "{ not json", "utf8");
   try {
     const lines = [];
@@ -307,23 +380,281 @@ test("malformed config file → defaults + debug line, hint still works", () => 
   }
 });
 
-// ── v0.3: подсказка строится только из confident:true ───────────────────────
+// ── v0.4: подсказка — до 5 кандидатов, confident first, «(возможно)» ──────
 
-test("v0.3: only confident positions enter the block (mixed pool)", () => {
+test("v0.4: mixed pool — confident candidates first, the rest marked «(возможно)»", () => {
   // «banana split zebra» (N=3): skill-beta covers banana+split (confident),
-  // delta/omega cover «zebra» alone (not confident) — the block must contain
-  // beta only, even though all three are in the raw result list.
+  // delta/omega cover «zebra» alone (not confident). v0.4 shows ALL THREE as
+  // candidates: beta first (confident), delta/omega after it with the marker.
   const ev = makeEvent("banana split zebra");
   newHook()(ev);
-  assert.equal(ev.system.length, 2, "a confident candidate exists → the block forms");
-  assert.deepEqual(entryNames(ev.system[1].text), ["skill-beta"]);
-  assert.ok(!ev.system[1].text.includes("skill-delta"), "a non-confident position must never be hinted");
-  assert.ok(!ev.system[1].text.includes("skill-omega"), "a non-confident position must never be hinted");
+  assert.equal(ev.system.length, 2, "candidates exist → the block forms");
+  assert.deepEqual(entryNames(ev.system[1].text), ["skill-beta", "skill-delta", "skill-omega"]);
+  const block = ev.system[1].text;
+  assert.ok(block.includes("- skill-beta: "), "confident candidate has no marker");
+  assert.ok(block.includes("- skill-delta (возможно): "), "unconfirmed candidate is marked");
+  assert.ok(block.includes("- skill-omega (возможно): "), "unconfirmed candidate is marked");
+  // the block presents options, it never asserts one answer (AC3 v0.4);
+  // v0.6.2: the note points the agent at the candidate descriptions
+  assert.ok(block.includes("посмотри описания кандидатов"), "the note tells the agent to read the descriptions");
 });
 
-test("v0.3: raw hits but no confident position → no block", () => {
-  const ev = makeEvent("banana zebra");
-  const before = structuredClone(ev.system);
+test("v0.4.1 (G): raw hits but no confident position → NO block (confident gate)", () => {
+  // «banana zebra quokka» (N=3 → need 2): beta covers «banana» alone,
+  // delta/omega cover «zebra» alone — nothing is confident, so the v0.4.1
+  // (variant G) gate keeps the block silent. NB: since v0.6.3 the old
+  // two-token «banana zebra» IS confident (need = 1 for N ≤ 2) and no longer
+  // exercises the gate — it is asserted as a positive case below.
+  const ev = makeEvent("banana zebra quokka");
   newHook()(ev);
-  assert.deepEqual(ev.system, before, "search finds something, the hint still stays silent");
+  assert.equal(ev.system.length, 1, "the confident gate must silence the hint");
+  assert.ok(!ev.system.some((p) => p && typeof p.text === "string" && p.text.includes("<skill_hint")));
+  // v0.6.3 control: the two-token query now passes the gate (hint-only mode)
+  const two = makeEvent("banana zebra");
+  newHook()(two);
+  assert.equal(two.system.length, 2, "v0.6.3: N=2 → need 1 → a confident pool builds a block");
+});
+
+test("v0.4: budget — buildHintBlock keeps ≤5 entries and drops the tail instead of returning ''", () => {
+  const many = [];
+  for (let i = 1; i <= 7; i += 1) {
+    many.push({ name: `skill-long${i}`, why: `x`.repeat(300), confident: true });
+  }
+  const block = buildHintBlock(many);
+  assert.ok(block.length > 0, "a fitting prefix must survive");
+  assert.ok(block.length <= MAX_BLOCK_CHARS, `block ${block.length} chars`);
+  const entries = entryLines(block);
+  assert.ok(entries.length >= 1 && entries.length <= MAX_ITEMS, `entries: ${entries.length}`);
+  assert.ok(entries.length < 7, "the over-budget tail is dropped");
+});
+
+// ── v0.4.1 (G): tool-тишина — вопрос про сам инструмент не получает хинта ──
+
+test("v0.4.1 (G): a complaint about the plugin/tool itself → no hint (tool-silence)", () => {
+  const queries = [
+    "а почему твой плагин не нашел этот скил и не активировал при создании?",
+    "почему skill-router не работает",
+    "а зачем skill-mcp, он не нашёл мой скилл",
+    "почему mcp не активировал скилл при установке",
+    "не работает плагин",
+  ];
+  for (const q of queries) {
+    const ev = makeEvent(q);
+    const before = structuredClone(ev.system);
+    newHook()(ev);
+    assert.deepEqual(ev.system, before, `tool-silence must keep the block empty: ${JSON.stringify(q)}`);
+    assert.equal(isToolSilent(q), true, `isToolSilent must be true for ${JSON.stringify(q)}`);
+  }
+});
+
+test("v0.4.1 (G): the tool word alone (no complaint) still gets the hint", () => {
+  // both queries keep a confident fixture hit («zebra operations» / «banana
+  // split») — silence must come from the complaint half only, not from the
+  // mere mention of the tool.
+  for (const q of ["zebra operations плагин", "banana split skill-mcp"]) {
+    const ev = makeEvent(q);
+    newHook()(ev);
+    assert.equal(ev.system.length, 2, `a plain tool mention is not silence: ${JSON.stringify(q)}`);
+    assert.equal(isToolSilent(q), false, `isToolSilent must be false for ${JSON.stringify(q)}`);
+  }
+  // a tool question WITHOUT a confident hit stays silent anyway (gate) —
+  // silence here would come from the confident gate, not from isToolSilent
+  const vague = makeEvent("настрой skill-mcp для проекта");
+  newHook()(vague);
+  assert.equal(vague.system.length, 1, "no confident fixture hit → gate silences");
+  assert.equal(isToolSilent("настрой skill-mcp для проекта"), false, "…while isToolSilent stays false");
+});
+
+test("v0.4.1 (G): isToolSilent needs BOTH halves — tool word + complaint word", () => {
+  assert.equal(isToolSilent("почему плагин не нашёл"), true);
+  assert.equal(isToolSilent("почему скилл не нашёл"), false, "no tool word → not silent");
+  assert.equal(isToolSilent("плагин для проекта"), false, "no complaint word → not silent");
+  assert.equal(isToolSilent("zebra operations"), false);
+  assert.equal(isToolSilent(""), false);
+  assert.equal(isToolSilent(null), false);
+  assert.equal(isToolSilent(42), false);
+});
+
+// ── v0.6.3 (owner task 27.10.2026, item 2): PRE-WARM индекса ───────────────
+
+test("v0.6.3 pre-warm: factory does not build; the build runs outside the request; FIRST call <150 ms", async () => {
+  let builds = 0;
+  const t0 = performance.now();
+  const hook = createContextHook({
+    env: {},
+    roots: [FIX_ROOT],
+    debug: false,
+    discover: (roots) => {
+      builds += 1;
+      return discoverSkills(roots);
+    },
+  });
+  const factoryMs = performance.now() - t0;
+  assert.equal(builds, 0, "the factory must not build synchronously — plugin load stays non-blocking");
+  assert.ok(factoryMs < BUDGET_MS, `factory returned in ${factoryMs.toFixed(1)} ms`);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(builds, 1, "the index is built on the scheduled tick, outside any user request");
+  const start = performance.now();
+  const ev = makeEvent("zebra operations");
+  hook(ev);
+  const first = performance.now() - start;
+  assert.ok(first < BUDGET_MS, `first call after the pre-warm: ${first.toFixed(1)} ms < ${BUDGET_MS} ms`);
+  assert.ok(ev.system.length >= 2, "the pre-warmed first dispatch gets its hint (not dropped by the guard)");
+  hook(makeEvent("banana split"));
+  assert.equal(builds, 1, "still exactly one build per hook instance");
+});
+
+test("v0.6.3 pre-warm: no skills at all → factory and hook stay silent (fail-open)", async () => {
+  let builds = 0;
+  let hook;
+  assert.doesNotThrow(() => {
+    hook = createContextHook({
+      env: { SKILL_MCP_RULE: "off" },
+      roots: [FIX_ROOT],
+      debug: false,
+      discover: () => {
+        builds += 1;
+        return { skills: [] };
+      },
+    });
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const ev = makeEvent("zebra operations");
+  assert.doesNotThrow(() => hook(ev), "an empty corpus must never break the hook");
+  assert.equal(ev.system.length, 1, "no skills → no hint");
+  assert.equal(builds, 1, "the empty build is cached, not retried");
+});
+
+test("v0.6.3 pre-warm: a broken discovery at load time is swallowed and cached", async () => {
+  let builds = 0;
+  const lines = [];
+  const hook = createContextHook({
+    env: { SKILL_MCP_RULE: "off" },
+    roots: [FIX_ROOT],
+    debug: (m) => lines.push(m),
+    discover: () => {
+      builds += 1;
+      throw new Error("roots gone");
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(builds, 1, "the failed build happened during the scheduled pre-warm");
+  assert.ok(lines.some((l) => l.includes("index build failed")), `debug line expected: ${JSON.stringify(lines)}`);
+  const ev = makeEvent("zebra operations");
+  assert.doesNotThrow(() => hook(ev));
+  assert.equal(builds, 1, "a failed pre-warm is not retried on the first dispatch");
+  assert.equal(ev.system.length, 1, "no index → no hint");
+});
+
+test("v0.6.3 pre-warm: SKILL_MCP_HINT=off schedules nothing at all", async () => {
+  let builds = 0;
+  createContextHook({
+    env: { SKILL_MCP_HINT: "off" },
+    roots: [FIX_ROOT],
+    debug: false,
+    discover: (roots) => {
+      builds += 1;
+      return discoverSkills(roots);
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(builds, 0, "a disabled hint must not pay for an index");
+});
+
+// ── v0.6.3 (owner task 27.10.2026, item 4): PRELOAD confident-кандидата ────
+
+test("v0.6.3 preload: the confident candidate's SKILL.md arrives as <skill_content> BEFORE the hint", () => {
+  const hook = createContextHook({ env: { SKILL_MCP_PRELOAD: "on", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false });
+  const ev = makeEvent("zebra operations");
+  hook(ev);
+  assert.equal(ev.system.length, 3, "preamble + skill content + hint");
+  const content = ev.system[1].text;
+  const hint = ev.system[2].text;
+
+  // the content part is opencode's own <skill_content> shape (frontmatter stripped)
+  assert.ok(content.startsWith('<skill_content name="skill-delta">'), content.slice(0, 90));
+  assert.ok(content.includes("# Skill: skill-delta"));
+  assert.ok(content.includes("Body text for delta."), "the SKILL.md body is embedded");
+  assert.ok(content.includes("Base directory for this skill:"), "the base-directory note travels");
+  assert.ok(content.includes("<skill_files>"), "the file list section travels");
+  assert.ok(content.endsWith("</skill_content>"));
+  assert.ok(!content.includes("<skill_hint"), "the content must not carry the hint envelope");
+
+  // the hint part is untouched and stays LAST — R1 note verbatim, no
+  // contradiction with the preloaded content
+  assert.ok(hint.startsWith("<skill_hint"), "the hint stays the last part");
+  assert.equal(hint.split("\n")[0], HINT_TAG);
+  assert.ok(hint.includes("- skill-delta: "), "the likely-match entry is present");
+  assert.ok(hint.includes(`note="${HINT_NOTE}"`), "R1 note verbatim");
+  assert.ok(!hint.includes("<skill_content"), "the hint block itself carries no content");
+
+  // the preloaded skill IS the confident entry at the head of the hint
+  const head = hint.split("\n").filter((l) => l.startsWith("- "))[0];
+  const headName = head.slice(2).split(":")[0];
+  assert.equal(headName, "skill-delta");
+  assert.equal(content.slice(0, content.indexOf(">")), `<skill_content name="${headName}"`);
+});
+
+test("v0.6.3 preload: off/0/false (any case) → content part gone, hint unchanged", () => {
+  for (const value of ["off", "0", "false", " OFF "]) {
+    const ev = makeEvent("zebra operations");
+    createContextHook({ env: { SKILL_MCP_PRELOAD: value, SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false })(ev);
+    assert.equal(ev.system.length, 2, `SKILL_MCP_PRELOAD=${JSON.stringify(value)} must disable the content part`);
+    assert.ok(ev.system[1].text.startsWith("<skill_hint"), "the hint itself is unaffected");
+  }
+});
+
+test("v0.6.3 preload: no confident candidate → no content part either", () => {
+  const ev = makeEvent("banana zebra quokka");
+  createContextHook({ env: { SKILL_MCP_PRELOAD: "on", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false })(ev);
+  assert.equal(ev.system.length, 1, "the gate silences the hint → there is nothing to preload");
+});
+
+test("v0.6.3 preload: unreadable skill path → hint only (fail-open)", () => {
+  const hook = createContextHook({
+    env: { SKILL_MCP_PRELOAD: "on", SKILL_MCP_RULE: "off" },
+    debug: false,
+    discover: () => ({
+      skills: [
+        { name: "skill-ghost", path: "C:/x/skill-ghost/SKILL.md", description: "zebra operations manual", bodyHeadings: [] },
+      ],
+    }),
+  });
+  const ev = makeEvent("zebra operations");
+  assert.doesNotThrow(() => hook(ev));
+  assert.equal(ev.system.length, 2, "the hint survives without the content part");
+  assert.ok(ev.system[1].text.startsWith("<skill_hint"));
+});
+
+test("v0.6.3 preload: a second call on the same event adds nothing (idempotent)", () => {
+  const hook = createContextHook({ env: { SKILL_MCP_PRELOAD: "on", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false });
+  const ev = makeEvent("zebra operations");
+  hook(ev);
+  hook(ev);
+  assert.equal(ev.system.length, 3, "still exactly one content part + one hint");
+  assert.equal(ev.system.filter((p) => typeof p.text === "string" && p.text.includes("<skill_content")).length, 1);
+});
+
+test("v0.6.3: «Составь текст» → confident candidate → the hint block builds", () => {
+  // The owner's acceptance query (item 1): under the old min(2, N) = 2 no
+  // skill could hold both «составь»+«текст», the confident gate stayed shut
+  // and NO hint was built at all. need = 1 for N = 2 changes exactly that.
+  const hook = createContextHook({
+    env: { SKILL_MCP_PRELOAD: "on", SKILL_MCP_RULE: "off" },
+    debug: false,
+    discover: () => ({
+      skills: [
+        { name: "promo", path: "C:/x/promo/SKILL.md", description: "Продающие лендинги и тексты для страниц продукта.", bodyHeadings: [] },
+        { name: "skill-noise", path: "C:/x/noise/SKILL.md", description: "совсем другое про котов и зелень", bodyHeadings: [] },
+      ],
+    }),
+  });
+  const ev = makeEvent("Составь текст");
+  hook(ev);
+  assert.equal(ev.system.length, 2, "confident gate passes → hint built; fake path → no content part");
+  const block = ev.system[1].text;
+  assert.ok(block.startsWith("<skill_hint"), block.slice(0, 60));
+  assert.ok(block.includes("- promo: "), `promo must be the confident entry: ${block}`);
+  assert.ok(!block.includes("(возможно)"), "the confident entry carries no marker");
+  assert.ok(!ev.system.some((p) => typeof p.text === "string" && p.text.includes("<skill_content")));
 });

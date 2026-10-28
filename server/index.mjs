@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// skill-router MCP server — stdio transport, JSON-RPC 2.0, read-only (R5).
+// skill-mcp MCP server — stdio transport, JSON-RPC 2.0, read-only (R5).
 //
 // Primary sources for the protocol behaviour (verified 2026-10-25):
 //   lifecycle / initialize / version negotiation:
@@ -38,7 +38,7 @@ const LATEST_PROTOCOL_VERSION = PROTOCOL_VERSIONS[0];
 const MAX_HEADINGS = 40; // outline cap (spec 6.2)
 const DEFAULT_MAX_LINES = 150; // read-section default (spec 6.3)
 const MAX_MAX_LINES = 600; // read-section hard cap (spec 6.3)
-const DEFAULT_LIMIT = 5; // find default (spec 6.1)
+const DEFAULT_LIMIT = 10; // find default (spec 6.1; v0.4.1 owner decision 26.10.2026: 10)
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 10;
 
@@ -52,29 +52,44 @@ try {
 }
 
 function log(...args) {
-  if (process.env.SKILL_ROUTER_DEBUG) process.stderr.write(`${args.join(" ")}\n`);
+  if (process.env.SKILL_MCP_DEBUG ?? process.env.SKILL_ROUTER_DEBUG) process.stderr.write(`${args.join(" ")}\n`);
 }
 
 const TOOLS = [
   {
     name: "find",
+    // v0.6.3 (owner task 27.10.2026, item 3 — find visibility): the Code Mode
+    // catalog shows the CHEAPEST line of each namespace (opencode L1/f1: one
+    // listing per namespace, cost = round(line.length/4), round-robin inside a
+    // 2000-cost budget). The old one-line description put find's listing at
+    // cost 115 while outline sat at 76, so the catalog showed `outline`. The
+    // description now LEADS with a short first line (the only part the catalog
+    // renders — first line, ≤120 chars) and the parameter semantics moved from
+    // the inputSchema property descriptions (they inflate every signature by
+    // one JSDoc comment per property) into the lines below; types, required,
+    // default/minimum/maximum are untouched, so the callable schema keeps its
+    // validation fields (and `limit` still renders @default/@minimum/@maximum).
     description:
-      "Local full-text search over SKILL.md files (BM25 over name, description and headings). Read-only. Returns {ok, items:[{name,path,score,why,confident}]} — the full result list; confident marks positions that cover >= min(2, N) significant query tokens (the hint shows confident:true only).",
+      "Call this FIRST when a request may need a skill; returns up to 10 candidates.\n" +
+      "Read the descriptions and choose the skill that matches the user's request — examples: writing text, landing page, design, code, legal, research. confident:true marks the likely match — verify it against its description before loading. Load the chosen skill with the skill tool before answering and follow its instructions; if no candidate matches, proceed without a skill.\n" +
+      "Local full-text search over SKILL.md files (BM25 over name, description and headings). Read-only. Returns {ok, items:[{name,path,score,why,description,confident}], next}. limit: how many results (1-10, default 10). restrict_to: keep only these skill names or glob patterns.\n" +
+      "confident marks positions covering >= need significant query tokens of the expanded query: need = 1 for a 1-2 token query, need = 2 from 3 tokens on (v0.6.3). v0.4.1: «описание» adds «текст», «продукт» adds «product», domain skills from BOOST_ORDER are boosted to the top of the pool. The hint shows up to 5 candidates, confident first.",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Search query; an empty string returns no items." },
+        // No per-property `description` (v0.6.3): they are what made find the
+        // priciest listing line in the Code Mode catalog; the meaning of every
+        // parameter is spelled out in the tool description above.
+        query: { type: "string" },
         limit: {
           type: "integer",
           minimum: MIN_LIMIT,
           maximum: MAX_LIMIT,
           default: DEFAULT_LIMIT,
-          description: `Maximum number of results (${MIN_LIMIT}-${MAX_LIMIT}).`,
         },
         restrict_to: {
           type: "array",
           items: { type: "string" },
-          description: "Only skills whose name matches one of these names or glob patterns.",
         },
       },
       required: ["query"],
@@ -221,17 +236,31 @@ function toolFind(args) {
   if (args.query === "") return { ok: true, items: [], note: "пустой запрос" };
 
   const st = getIndex(); // may throw UnavailableError
-  // v0.3 (owner decision 26.10.2026): `find` returns EVERYTHING the index
-  // found, each position carrying `confident`. The coverage rule no longer
-  // filters this list — it only decides the `note` (and the plugin hint, which
-  // reads confident:true only). AC3 «no random hints» binds the HINT, not the
-  // full `find` output (docs/contract.md).
+  // v0.4 (owner decision 26.10.2026 — candidate list, the agent chooses):
+  // `find` returns up to `limit` candidates (default 10 since v0.4.1, max 10),
+  // each position carrying `confident` and the skill `description`. The
+  // coverage rule does not filter this list — it only decides the `note` (and
+  // the plugin hint, which shows up to 5 candidates, confident first). AC3 is
+  // now «кандидаты, не утверждение»: candidates, not a claim (docs/contract.md).
+  // v0.4.1 (variant G): the expansion («описание»→«текст», «продукт»→«product»)
+  // and the BOOST_ORDER domain boost happen inside core `search` — `find`
+  // receives them automatically.
   const items = search(st.index, args.query, { limit, restrict_to: restrictTo });
   if (items.length === 0) return { ok: true, items: [], note: "ничего не найдено" };
+  // v0.6.2 (owner task 27.10.2026 — «посмотри описания, потом загрузи»): every
+  // non-empty result carries a top-level `next`. A confident FIRST item gets a
+  // likely-match line (name included); otherwise the agent is told to compare
+  // the candidate descriptions and load the skill that matches. Empty results
+  // carry no `next` — there is nothing to review.
+  const first = items[0];
+  const next =
+    first && first.confident === true
+      ? `likely match: ${first.name} — verify its description and load it`
+      : "review the candidate descriptions; load the matching skill";
   if (!items.some((it) => it && it.confident === true)) {
-    return { ok: true, items, note: "уверенных совпадений нет" };
+    return { ok: true, items, note: "уверенных нет, вот возможные", next };
   }
-  return { ok: true, items };
+  return { ok: true, items, next };
 }
 
 function toolOutline(args) {
@@ -363,9 +392,11 @@ function handleInitialize(params) {
   return {
     protocolVersion,
     capabilities: { tools: {} },
-    serverInfo: { name: "skill-router", title: "skill-router", version: serverVersion },
+    serverInfo: { name: "skill-mcp", title: "skill-mcp", version: serverVersion },
     instructions:
-      "Read-only search over local SKILL.md files. Tools: find (search), outline (headings), read-section (one section).",
+      // v0.6.3 (item 3): lead with `find` — the namespace line the Code Mode
+      // catalog renders as `- skill-mcp (…)` starts with this text.
+      "Read-only search over local SKILL.md files. Start with find (search), then outline (headings) and read-section (one section).",
   };
 }
 

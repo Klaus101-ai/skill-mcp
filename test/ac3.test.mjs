@@ -2,10 +2,13 @@
 // exercised through the PRODUCTION search() (core/index.mjs) and through the
 // plugin hint. v0.3 (owner decision 26.10.2026) split the two consumers:
 // search() returns EVERYTHING it found and marks each position with
-// `confident` (the former ≥ min(2, N) coverage rule), while the plugin hint
-// is built from `confident:true` positions only — so `[]` now means "nothing
-// matched at all / nothing significant could prove anything", and a raw match
-// that does not cover enough shows up as `confident:false`, never as [].
+// `confident` (the former ≥ min(2, N) coverage rule). v0.4 (owner decision
+// 26.10.2026, «5 кандидатов») made the hint a CANDIDATE list: it shows up to
+// 5 positions from that ranked list (confident first), marks the
+// `confident:false` ones «(возможно)» and leaves the choice to the agent's
+// model — so `[]` now means "nothing matched at all / nothing significant
+// could prove anything", while a raw match that does not cover enough shows
+// up as a marked candidate, never as [].
 // M6: the match is TOKEN-level — equality of normalized/stemmed tokens, not a
 // substring of a longer word (bus∌business, next∌next.js), a hyphen splits a
 // word (gsap ⊂ gsap-scrolltrigger), upper-case acronyms are significant.
@@ -142,11 +145,15 @@ test("M7 coverage N=0: only service words → nothing can prove a match → []",
   assert.deepEqual(search(idx, "the of and for with is", { limit: 5 }), [], "M5 short list still holds");
 });
 
-test("M7 coverage N=2: one shared token is not confident, two matched tokens are", () => {
+test("coverage rule: N=2 is proven by ONE token (v0.6.3), N=3 still needs two", () => {
   const one = buildIndex([skill("skill-office", "office supplies catalog")]);
   const partial = search(one, "office coffee", { limit: 5 });
   assert.equal(partial.length, 1, "1 of 2 meaningful tokens is still returned (v0.3)");
-  assert.equal(partial[0].confident, false, "1 of 2 meaningful tokens proves nothing");
+  // v0.6.3 (owner task 27.10.2026): `need = N <= 2 ? 1 : min(2, N)` — a
+  // 1–2-token query is proven by one token, so 1 of 2 IS confident now
+  // (it was `false` under the old `min(2, N)`; the expectation changed with
+  // the rule, the N ≥ 3 expectations below did not).
+  assert.equal(partial[0].confident, true, "N=2 → need 1: one covered token proves it");
   const both = buildIndex([skill("skill-coffee", "office coffee machine")]);
   const full = search(both, "office coffee", { limit: 5 });
   assert.equal(full.length, 1, "2 of 2 = minimal proof");
@@ -230,19 +237,19 @@ function makeEvent(text) {
 
 test("plugin: AC3 query -> no <skill_hint> block at all", () => {
   const ev = makeEvent("Как сварить борщ с говядиной");
-  createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
+  createContextHook({ env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false })(ev);
   assert.equal(ev.system.length, 1, "no block must be appended");
 });
 
 test("plugin: stop-word-only query -> no <skill_hint> block", () => {
   const ev = makeEvent("the of and for with is");
-  createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
+  createContextHook({ env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false })(ev);
   assert.equal(ev.system.length, 1, "no block must be appended");
 });
 
 test("plugin: meaningful match still produces exactly one block", () => {
   const ev = makeEvent("zebra operations");
-  createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
+  createContextHook({ env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false })(ev);
   assert.equal(ev.system.length, 2, "one block appended");
   assert.ok(ev.system[1].text.includes("skill-delta"));
 });
@@ -251,25 +258,40 @@ test("plugin: meaningful match still produces exactly one block", () => {
 
 const FIX_INDEX = buildIndex(discoverSkills([FIX_ROOT]).skills);
 
-test("v0.3: search returns raw hits with confident:false instead of []", () => {
-  // «banana zebra» (N=2): skill-beta holds only «banana», delta/omega only
-  // «zebra» — nobody covers both, so nothing is confident, but v0.3 still
-  // returns all three positions (search is no longer gated).
+test("v0.3: search returns the raw hits instead of [] — and since v0.6.3 «banana zebra» is confident", () => {
+  // «banana zebra» (N = 2): skill-beta holds «banana», delta/omega «zebra» —
+  // under the OLD min(2, N) nobody covered both, so every flag was false.
+  // v0.6.3 (owner task 27.10.2026): need = 1 for N = 2, one covered token
+  // proves a two-token query — all three positions are confident now. The
+  // «search is not gated» part of this test is unchanged: the same three raw
+  // positions are returned either way.
   const results = search(FIX_INDEX, "banana zebra", { limit: 10 });
   assert.deepEqual(
     results.map((r) => [r.name, r.confident]),
     [
-      ["skill-beta", false],
-      ["skill-delta", false],
-      ["skill-omega", false],
+      ["skill-beta", true],
+      ["skill-delta", true],
+      ["skill-omega", true],
     ],
   );
 });
 
-test("v0.3: the hint shows nothing when every hit is confident:false", () => {
-  const ev = makeEvent("banana zebra");
-  createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
-  assert.equal(ev.system.length, 1, "raw hits exist, but no confident position -> no block");
+test("v0.4.1: no confident position → the hint stays silent (confident gate, variant G)", () => {
+  // v0.3 stayed silent here; v0.4 showed the candidates (all marked); v0.4.1
+  // (owner decision 26.10.2026, variant G) silences the hint again: without a
+  // single `confident:true` position in the pool no block is built.
+  // v0.6.3 (owner task 27.10.2026) moved the gate's floor for 2-token queries
+  // (need = 1), so «banana zebra» is confident now and no longer exercises the
+  // gate — the query below is N = 3 (need 2): beta covers «banana» alone,
+  // delta/omega cover «zebra» alone, nobody covers two tokens → silence.
+  const ev = makeEvent("banana zebra quokka");
+  createContextHook({ env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false })(ev);
+  assert.equal(ev.system.length, 1, "raw hits exist but nothing is confident → no block");
+  assert.ok(!ev.system.some((p) => p && typeof p.text === "string" && p.text.includes("<skill_hint")));
+  // control: the old two-token query IS hinted now (N=2 → need 1)
+  const two = makeEvent("banana zebra");
+  createContextHook({ env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false })(two);
+  assert.equal(two.system.length, 2, "v0.6.3: a 2-token query with confident hits → block");
 });
 
 test("v0.3: empty/punctuation query -> [] from search and no hint block", () => {
@@ -277,7 +299,7 @@ test("v0.3: empty/punctuation query -> [] from search and no hint block", () => 
   assert.deepEqual(search(FIX_INDEX, "   "), []);
   assert.deepEqual(search(FIX_INDEX, "!!! ... ---"), []);
   const ev = makeEvent("!!! ... ---");
-  createContextHook({ env: {}, roots: [FIX_ROOT], debug: false })(ev);
+  createContextHook({ env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off" }, roots: [FIX_ROOT], debug: false })(ev);
   assert.equal(ev.system.length, 1, "no letters -> no hint");
 });
 
@@ -287,10 +309,13 @@ test("v0.3: hint on «проверь договор поставки» contains 
     t.skip("supply-contract-review not in the default roots on this host");
     return;
   }
-  const hook = createContextHook({ env: {}, debug: false });
-  // the first call of a fresh hook pays the index build (~400 ms on this
-  // install) and is dropped by the 150 ms guard (documented behaviour);
-  // the measured call runs against the built index, like the next dispatch.
+  const hook = createContextHook({ env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off" }, debug: false });
+  // This test creates the hook and calls it in the SAME tick, so the v0.6.3
+  // pre-warm (scheduled on setImmediate at factory time) has not fired yet:
+  // the first call still pays the index build and is dropped by the 150 ms
+  // guard; the measured call runs against the built index. In production
+  // setup() and the first dispatch are far apart, so the pre-warmed first
+  // call fits the budget (see test/plugin.test.mjs, v0.6.3 pre-warm).
   hook(makeEvent("warm-up: index build, not asserted"));
   const ev = makeEvent("проверь договор поставки");
   hook(ev);
@@ -298,5 +323,73 @@ test("v0.3: hint on «проверь договор поставки» contains 
   assert.ok(
     ev.system[1].text.includes("supply-contract-review"),
     `block must name supply-contract-review: ${ev.system[1].text}`,
+  );
+});
+
+// ── v0.6.3 (owner task 27.10.2026, item 1): need = N <= 2 ? 1 : min(2, N) ───
+
+test("v0.6.3 need: N=1 → 1, N=2 → 1, N≥3 → 2, N=0 → []", () => {
+  const idx = buildIndex([
+    skill("skill-a", "office supplies catalog"), // covers «office» only
+    skill("skill-b", "office coffee machine"), // covers «office» + «coffee»
+    skill("skill-c", "цветы и полив подоконника"), // covers «цветы» only
+  ]);
+  // N = 1 → need 1 (unchanged: min(2, 1) was already 1)
+  assert.equal(search(idx, "цветы", { limit: 5 })[0]?.confident, true, "N=1 → need 1");
+  assert.equal(search(idx, "цветы", { limit: 5 }).length, 1, "N=1 → its single token proves it");
+  // N = 2 → need 1 (CHANGED by v0.6.3: min(2, 2) = 2 used to demand both)
+  const n2 = search(idx, "office coffee", { limit: 5 });
+  assert.equal(n2.find((r) => r.name === "skill-a")?.confident, true, "N=2 → need 1: one covered token proves");
+  assert.equal(n2.find((r) => r.name === "skill-b")?.confident, true, "N=2 → 2 of 2 is still confident");
+  // N = 3 → need 2 (unchanged): a lone token never proves a longer query
+  const n3 = search(idx, "цветы гонконг фуникулер", { limit: 5 });
+  assert.equal(n3.find((r) => r.name === "skill-c")?.confident, false, "N=3 → need 2, one token is not enough");
+  // N = 0 (service words only) → nothing can prove a match → []
+  assert.deepEqual(search(idx, "на по с", { limit: 5 }), []);
+});
+
+test("v0.6.3: «Составь текст» → a confident candidate (the one holding «текст»)", () => {
+  const idx = buildIndex([
+    skill("skill-texty", "составление текстов для соцсетей и постов"),
+    skill("skill-noise", "совсем другое про котов и зелень"),
+  ]);
+  const results = search(idx, "Составь текст", { limit: 5 });
+  assert.ok(results.length >= 1, "the raw hit must be returned");
+  assert.equal(results[0].name, "skill-texty");
+  assert.equal(results[0].confident, true, "N=2 («составь»+«текст») → need 1: «текст» proves it");
+  // control: a skill without «текст» is not confident for the same query
+  const other = buildIndex([skill("skill-noise", "совсем другое про котов и зелень")]);
+  assert.ok(
+    search(other, "Составь текст", { limit: 5 }).every((r) => r.confident === false),
+    "no covered token → not confident",
+  );
+});
+
+test("v0.6.3: «Составь текст» on the real corpus → confident hit AND a hint block", (t) => {
+  const { skills } = discoverSkills(defaultRoots());
+  const idx = buildIndex(skills);
+  const results = search(idx, "Составь текст", { limit: 10 });
+  if (!results.some((r) => r.confident === true)) {
+    t.skip("no «текст»-carrying skill in the default roots on this host");
+    return;
+  }
+  // NB: v0.4.1's domain boost may lift a BOOST_ORDER member to position 1
+  // regardless of its flag, so the confident position is asserted as
+  // "somewhere in the pool" (the gate input), not as results[0].
+  // the confident gate opens → the plugin builds its block (hint-only mode:
+  // the separate preload part is switched off here, its shape is asserted in
+  // test/plugin.test.mjs)
+  const hook = createContextHook({ env: { SKILL_MCP_PRELOAD: "off", SKILL_MCP_RULE: "off" }, debug: false });
+  hook(makeEvent("warm-up: index build, not asserted"));
+  const ev = makeEvent("Составь текст");
+  hook(ev);
+  assert.equal(ev.system.length, 2, "confident candidates → the hint block forms");
+  const block = ev.system[1].text;
+  assert.ok(block.startsWith("<skill_hint"), block.slice(0, 60));
+  const entries = block.split("\n").filter((l) => l.startsWith("- "));
+  assert.ok(entries.length >= 1, `no entries: ${block}`);
+  assert.ok(
+    entries.some((l) => !l.includes("(возможно)")),
+    `the confident head must be unmarked: ${entries.join(" | ")}`,
   );
 });

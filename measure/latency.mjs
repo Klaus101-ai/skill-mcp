@@ -12,7 +12,7 @@
 //   5. p50/p95/max (nearest-rank percentile) over the 60 samples.
 //
 // env is passed as {} so the hint is ON regardless of the shell environment;
-// config comes from the real plugin/skill-router.config.json.
+// config comes from the real plugin/skill-mcp.config.json.
 //
 // Usage: node measure/latency.mjs
 import fs from "node:fs";
@@ -101,7 +101,7 @@ for (const q of queries) {
 const sSearch = stats(searchSamples);
 const sFull = stats(fullSamples);
 
-console.log("skill-router latency — heldout.jsonl (60 queries), hint path = plugin/hint.mjs");
+console.log("skill-mcp latency — heldout.jsonl (60 queries), hint path = plugin/hint.mjs");
 console.log(`skills indexed: ${skills.length}`);
 console.log("");
 console.log(`index build (discover + buildIndex)      : ${ms(buildMs)}`);

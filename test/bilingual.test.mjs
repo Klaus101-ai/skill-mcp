@@ -110,8 +110,9 @@ test("v0.2 regression: the owner's request-verb message yields no hint candidate
   }
   const idx = buildIndex(skills);
   const msg = "Ты можешь сам запустить тесты? Посмотри какие есть скилы. И попробуй их пррогнать";
-  // v0.3: search returns the raw list — the message still proves nothing, so
-  // every position is confident:false and the hint (confident only) stays off.
+  // v0.3/v0.4: search returns the raw list — the message still proves
+  // nothing, so every position is confident:false (in v0.4 the hint would
+  // show them as candidates marked «(возможно)», never as proven matches).
   const results = search(idx, msg, { limit: 10 });
   assert.ok(
     results.every((r) => r.confident === false),
@@ -165,13 +166,16 @@ test("v0.2.1: a weak alias never counts toward coverage («письмо» via `l
   const idx = buildIndex([skill("skill-letter", "contract letter drafting for law firms")]);
   // the weak alias IS still indexed — raw MiniSearch sees «письмо» (it ranks)
   assert.ok(idx.search("письмо").length >= 1, "weak alias must stay in the index");
-  // … but it can not help PROVE the topic: 1 of 2 meaningful tokens (только
-  // «договор») → the position is returned with confident:false (v0.3) and the
-  // hint therefore never shows it.
-  const partial = search(idx, "письмо договор", { limit: 5 });
+  // … but it can not help PROVE the topic. v0.6.3 (need = 1 for a 2-token
+  // query) made the old «письмо договор» pair insufficient to test this —
+  // ONE covered token («договор») would already be confident — so the probe
+  // query now carries three tokens: even if the weak alias were counted, the
+  // doc would reach 2 of 3 and turn confident, hence confident:false here is
+  // exactly the "weak pair does not count" proof.
+  const partial = search(idx, "письмо договор зонтик", { limit: 5 });
   assert.equal(partial.length, 1, "the raw match is returned (v0.3)");
   assert.equal(partial[0].name, "skill-letter");
-  assert.equal(partial[0].confident, false, "a weak alias proves nothing");
+  assert.equal(partial[0].confident, false, "1 of 3 (weak alias not counted) proves nothing");
   // control: with a strong pair the very same doc is reachable and confident (1 of 1)
   assert.equal(search(idx, "договор", { limit: 5 })[0]?.confident, true, "strong pair must still cover");
   assert.equal(search(idx, "letter", { limit: 5 })[0]?.confident, true, "the EN word itself is own text, not an alias");

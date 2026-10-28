@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Demo: print exactly the text part plugin/skill-router-hint.ts would append
+// Demo: print exactly the text part plugin/skill-mcp-hint.ts would append
 // to `system` for a query, plus the formation time in ms. Plain Node — no
 // opencode, no plugin registration, no writes.
 //

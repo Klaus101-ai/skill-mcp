@@ -7,6 +7,11 @@
 // core/text.mjs and are applied identically to documents and queries.
 // No network calls, no writes, no AI: the RU↔EN bridge is one static file
 // (core/lexicon.ru-en.json), R5.
+//
+// v0.4.1 (owner decision 26.10.2026 — variant G): `search()` expands the
+// query («описание» → +«текст», «продукт» → +«product») and applies the
+// domain boost (BOOST_ORDER to the top of the returned pool) — the rules
+// live next to `search`, both consumers (MCP `find`, plugin hint) get them.
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import MiniSearch from "minisearch";
@@ -131,7 +136,8 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 // `search()` returns EVERYTHING MiniSearch found and marks each position with
 // `confident: boolean` instead of dropping the rest:
 //
-//   confident = (number of matched significant tokens) >= min(MIN_COVERAGE, N)
+//   need   = N <= 2 ? 1 : min(MIN_COVERAGE, N)          (owner task 27.10.2026, v0.6.3)
+//   confident = (number of matched significant tokens) >= need
 //
 // where N = the number of significant query tokens. A token counts as matched
 // only when it occurs in the document's `cover` vocabulary (v0.2.1): the
@@ -149,14 +155,17 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 // the full `find` output — the AC3 rationale lives with the consumer that
 // shows a position to the model.
 //
-// Why 2 (rationale in README.md § AC3, "why two tokens"): one lone matched
-// word is never proof of the topic — it is exactly how the junk queries got
-// their answers («office», «when», a single shared token); two matched tokens
-// are the minimal sign that a skill really talks about the request. Queries
-// made of 1–2 meaningful tokens are proven by one of them (min(2, N)), so a
-// short, precise query is never over-tightened. N = 0 (only stop words and
-// short/acronym-less tokens) can be proven by nothing at all — such a query
-// never reaches MiniSearch (`significantQueryTokens` is empty → []).
+// Why: one lone matched word is never proof of the topic — it is exactly how
+// the junk queries got their answers («office», «when», a single shared
+// token), so for a 3+ token query two matched tokens are the minimal sign
+// that a skill really talks about the request. A short query is a precise
+// query: v0.6.3 (owner task 27.10.2026) fixes `need` at ONE token for N = 1
+// and N = 2 (the comment consumer at the rule site: «1–2-token query needs
+// one»), so «Составь текст» is proven by the candidate that holds «текст»
+// instead of being gated out; N >= 3 keeps min(MIN_COVERAGE, N) = 2.
+// N = 0 (only stop words and short/acronym-less tokens) can be proven by
+// nothing at all — such a query never reaches MiniSearch
+// (`significantQueryTokens` is empty → []).
 //
 // There is deliberately NO score threshold: scores still RANK the list, they
 // never VALIDATE it, so nothing is derived from a measured gap on set A and
@@ -194,7 +203,7 @@ export function buildIndex(skills) {
     // v0.2.1 coverage vocabulary (AC3): every term of the document's OWN text
     // plus the stems of its STRONG aliases. Weak aliases are deliberately
     // absent — they are indexed in `aliases` (and still rank) but can never
-    // count as one of the ≥ min(2, N) meaningful matches.
+    // count as one of the `need` meaningful matches (v0.6.3: 1 for N ≤ 2, 2 above).
     const cover = new Set();
     for (const raw of tokenize(text)) {
       const t = processTerm(raw);
@@ -328,8 +337,85 @@ export function selectWinner(candidates) {
   return best;
 }
 
+// ── v0.4.1 domain boost + query expansion (variant G) ──────────────────────
+// Owner decision 26.10.2026 (variants lab, variant G «synonyms+boost»):
+// a request in the text/copy domain should surface the domain skills
+// (promo, copywriting …) at the top of the pool, and a couple of high-value
+// synonyms are bridged in the QUERY (not in the lexicon — no new pairs, the
+// lexicon file stays untouched). Two pieces, both local and static (R5):
+//
+//   1. EXPANSION — `expandQuery`: «описание…» (root «описан») appends
+//      «текст», «продукт» appends « product». The expansion applies to the
+//      SEARCH side only: `significantQueryTokens`, the `cover` check and the
+//      `why` line all run on the expanded query, so the added tokens count
+//      toward `confident` like any other query token.
+//   2. DOMAIN BOOST — `boostReorder`: when the ORIGINAL query matches
+//      BOOST_TRIGGER, the already-found (already capped to `limit`) pool is
+//      reordered — skills named in BOOST_ORDER move to the front in that
+//      exact order, everything else keeps its relative order behind them.
+//      The boost ONLY repositions what the search already returned; it never
+//      adds a skill and never re-ranks inside the domain group.
+//
+// Honest limits (owner-open, README §8): the domain list is HARDCODED, and
+// the boost lifts a domain skill only when it is already inside the top
+// `limit` pool — a promo that fell out of the pool is not resurrected.
+
+/** Trigger for the v0.4.1 domain boost (checked against the original query). */
+export const BOOST_TRIGGER = /(описан|текст|лендинг|копирайт|продукт)/iu;
+
 /**
- * Search the index. Returns [{name, path, score, why, confident}] ordered by
+ * v0.4.1 domain boost order (owner decision 26.10.2026, variant G). These
+ * names, in this order, rise to the top of a trigger-matched pool; the rest
+ * of the pool keeps its original order.
+ */
+export const BOOST_ORDER = [
+  "promo",
+  "copywriting",
+  "site-copywriting",
+  "app-copywriting",
+  "documentation-and-adrs",
+  "redpolitika",
+];
+
+/**
+ * v0.4.1 query expansion (variant G): «описан…» → +«текст», «продукт…» →
+ * +« product». Idempotence is not required (one pass per search call).
+ * v0.6.1 (fix 27.10.2026): the «текст» trigger also fires on the VERB stem
+ * «опиш» (опиши/опишите/опишет/опишут) — «опиши продукт» used not to expand
+ * (only the noun «описан…» matched) and promo fell out of the top-10 pool.
+ * «опиш» and «описан» are disjoint (after «опи» comes «ш» vs «с»), so the
+ * union matches exactly the describe-verb forms plus the existing nouns.
+ */
+export function expandQuery(query) {
+  let expanded = query;
+  if (/описан|опиш/iu.test(query)) expanded += " текст";
+  if (/продукт/iu.test(query)) expanded += " product";
+  return expanded;
+}
+
+/**
+ * v0.4.1 domain boost: stable reorder of an already-formed pool. BOOST_ORDER
+ * members present in `hits` lead in BOOST_ORDER order (first occurrence per
+ * name wins); every other position follows in its original order. No
+ * additions, no removals, no reordering inside either group.
+ */
+export function boostReorder(hits) {
+  if (!Array.isArray(hits)) return [];
+  const byName = new Map();
+  for (const h of hits) if (h && typeof h.name === "string" && !byName.has(h.name)) byName.set(h.name, h);
+  const out = [];
+  for (const name of BOOST_ORDER) {
+    const hit = byName.get(name);
+    if (hit) out.push(hit);
+  }
+  const used = new Set(out.map((h) => h.name));
+  for (const h of hits) if (!used.has(h.name)) out.push(h);
+  return out;
+}
+
+/**
+ * Search the index. Returns [{name, path, score, why, description, confident}]
+ * ordered by
  * `confident` first (true before false — v0.3.1), then score descending (ties
  * broken deterministically by name, then path), with duplicate skill names
  * collapsed to their best-scoring entry. Empty / whitespace-only /
@@ -340,9 +426,11 @@ export function selectWinner(candidates) {
  * each position carries `confident: boolean`, computed by the former AC3
  * coverage rule (M5–M7): the number of matched significant tokens — token
  * EQUALITY after the shared normalization/stemming pipeline — must be
- * >= min(MIN_COVERAGE, N), where N = the number of significant query tokens
- * of the query (>= 3 chars or a whitelisted upper-case acronym, not stop
- * words, normalized + stemmed — core/text.mjs). A token is matched only when
+ * >= need, where need = N <= 2 ? 1 : min(MIN_COVERAGE, N) (v0.6.3, owner task
+ * 27.10.2026: a 1–2-token query is proven by ONE of its tokens, N >= 3 still
+ * needs two) and N = the number of significant query tokens of the query
+ * (>= 3 chars or a whitelisted upper-case acronym, not stop words, normalized
+ * + stemmed — core/text.mjs). A token is matched only when
  * it occurs in the document's `cover` vocabulary (name/description/headings
  * own tokens + STRONG bilingual aliases; weak aliases rank but never cover).
  *
@@ -353,6 +441,14 @@ export function selectWinner(candidates) {
  * rules live in server/index.mjs), the plugin hint builds its block from
  * `confident:true` positions only (plugin/hint.mjs).
  *
+ * v0.4.1 (owner decision 26.10.2026 — variant G, «synonyms+boost»): the query
+ * is first passed through `expandQuery` («описан…» → +«текст», «продукт…» →
+ * +« product»); `significantQueryTokens`, the coverage check and `why` all
+ * operate on the EXPANDED query, so the added tokens count toward
+ * `confident` like any others. When the ORIGINAL query matches
+ * `BOOST_TRIGGER`, the capped pool is then passed through `boostReorder`
+ * (BOOST_ORDER members to the front, in order; no additions).
+ *
  * `boost` optionally overrides the field weights (used by measure/weights.mjs
  * to compare weight candidates on the A set without editing this file).
  */
@@ -362,7 +458,12 @@ export function search(index, query, { limit = 5, restrict_to: restrictTo, boost
   if (!q) return [];
   if (!/[\p{L}\p{N}]/u.test(q)) return []; // punctuation-only garbage (AC3)
 
-  const sig = significantQueryTokens(q);
+  // v0.4.1 (variant G): one expansion pass for the whole call — tokens,
+  // coverage and `why` see the expanded query, the boost trigger below is
+  // tested against the ORIGINAL query (as in the lab's variant G).
+  const expanded = expandQuery(q);
+
+  const sig = significantQueryTokens(expanded);
   if (sig.length === 0) return []; // nothing meaningful could prove a match (AC3)
 
   const options = { boost: boost ? { ...boost } : { ...FIELD_BOOST } };
@@ -370,14 +471,18 @@ export function search(index, query, { limit = 5, restrict_to: restrictTo, boost
     options.filter = makeFilter(restrictTo);
   }
 
-  const matched = index.search(q, options);
+  const matched = index.search(expanded, options);
   // Confidence (M7 rule, no longer a filter — v0.3): a position is confident
-  // if at least min(2, N) of the query's meaningful tokens occur in its
+  // if at least `need` of the query's meaningful tokens occur in its
   // `cover` vocabulary (own text + STRONG aliases) by token equality after
-  // stemming. One shared token proves nothing; a 1–2-token query needs one.
-  // Weak aliases never count; a document stored without `cover` (not built
-  // by buildIndex) falls back to MiniSearch's r.match terms.
-  const need = Math.min(MIN_COVERAGE, sig.length);
+  // stemming. `need` is ONE for a 1–2-token query and min(2, N) from N = 3 on
+  // (v0.6.3 owner task 27.10.2026 — the site comment this code follows:
+  // «1–2-token query needs one»): a short, precise query like «Составь текст»
+  // is proven by the single candidate token it does share («текст»), while a
+  // longer junk query still needs two. Weak aliases never count; a document
+  // stored without `cover` (not built by buildIndex) falls back to
+  // MiniSearch's r.match terms.
+  const need = sig.length <= 2 ? 1 : Math.min(MIN_COVERAGE, sig.length);
   const withConfidence = matched.map((r) => {
     const cover = Array.isArray(r.cover) ? new Set(r.cover) : null;
     const match = r.match || null;
@@ -403,11 +508,16 @@ export function search(index, query, { limit = 5, restrict_to: restrictTo, boost
 
   const capped = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), unique.length) : unique.length;
 
-  return unique.slice(0, capped).map((r) => ({
+  const results = unique.slice(0, capped).map((r) => ({
     name: r.name,
     path: r.path,
     score: r.score,
     why: buildWhy(r),
+    description: r.description || "",
     confident: r.confident === true,
   }));
+  // v0.4.1 (variant G): the domain boost reorders the CAPPED pool only — it
+  // promotes BOOST_ORDER members that made the top-`limit` by score; a skill
+  // outside the pool is never added (the lab's «буст только переставляет»).
+  return BOOST_TRIGGER.test(q) ? boostReorder(results) : results;
 }

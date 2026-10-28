@@ -185,7 +185,7 @@ test("isInsideRoot: same boundary as resolveSkillPath (AC4 groundwork)", () => {
 
 test("discoverSkills: SKILL.md symlink escaping its root is skipped and reported", (t) => {
   const outsideFile = path.join(HERE, "fixtures", "outside", "SKILL.md");
-  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "skill-router-link-"));
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "skill-mcp-link-"));
   const root = path.join(tmpBase, "root");
   fs.mkdirSync(root, { recursive: true });
   const link = path.join(root, "link-skill", "SKILL.md");
