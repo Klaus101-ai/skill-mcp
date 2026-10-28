@@ -1,5 +1,5 @@
 /**
- * opencode plugin: skill-router context hint («secretary»), spec §7.
+ * opencode plugin: skill-mcp context hint («secretary»), spec §7.
  *
  * Before every model dispatch (hook `context`, i.e. the agent loop including
  * tool-driven continuations) appends ONE text part with a `<skill_hint>` block
@@ -67,7 +67,7 @@ interface PluginModule {
 }
 
 const plugin: PluginModule = {
-  id: "skill-router-hint",
+  id: "skill-mcp-hint",
   async setup(ctx) {
     const onContext = createContextHook();
     await ctx.session.hook("context", (event) => {

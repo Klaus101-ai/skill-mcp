@@ -4,3 +4,5 @@ node_modules/
 .bak-*
 *.bak-*
 writer-report.md
+
+*.tgz
