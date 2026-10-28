@@ -1,21 +1,51 @@
 {
-  "name": "skill-router",
-  "version": "0.3.1",
-  "description": "Local skill search and ranking for opencode: BM25-backed index over SKILL.md files, no network, no LLM.",
+  "name": "skill-finder-mcp",
+  "version": "0.6.4",
+  "description": "Local MCP server and opencode plugin that gets an agent to use its skills: BM25 search over SKILL.md, candidates in context, likely match preloaded. No network or LLM.",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "skill-finder-mcp": "./dist/cli.mjs",
+    "skill-mcp": "./dist/cli.mjs"
+  },
+  "main": "./dist/plugin.mjs",
+  "exports": {
+    ".": "./dist/plugin.mjs",
+    "./server": "./dist/server.mjs",
+    "./cli": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Klaus101-ai/skill-mcp.git"
+  },
+  "homepage": "https://github.com/Klaus101-ai/skill-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Klaus101-ai/skill-mcp/issues"
+  },
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build",
     "test": "node --test",
+    "serve": "node dist/server.mjs",
     "smoke": "node cli/smoke.mjs",
     "measure": "node measure/run.mjs",
     "latency": "node measure/latency.mjs",
     "measure:baseline": "node measure/baseline.mjs --k 5",
     "server": "node server/index.mjs"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "^0.27.0",
+    "jsonc-parser": "^3.3.1",
     "minisearch": "7.2.0"
   }
 }
