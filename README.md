@@ -4,7 +4,7 @@
 > SKILL.md, puts it in front of the model and preloads the likely match — the
 > model still does the loading.
 
-[![npm](https://img.shields.io/npm/v/skill-finder-mcp?label=npm)](https://www.npmjs.com/package/skill-finder-mcp)
+[![release](https://img.shields.io/github/v/release/Klaus101-ai/skill-mcp?label=release)](https://github.com/Klaus101-ai/skill-mcp/releases)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen.svg)](https://nodejs.org)
 
@@ -14,9 +14,10 @@ plugin: BM25 search over your `SKILL.md` files, up to 5 candidates in the
 model's context, the likely match's SKILL.md preloaded, and a rule that makes
 the agent call `find` before it starts working. No network, no LLM, no API keys.
 
-Names, once: the npm package is **`skill-finder-mcp`** (the bare `skill-mcp`
-is taken on npm), the MCP server and its bin are **`skill-mcp`**, the plugin
-id is **`skill-mcp-hint`**. Current release: **v0.6.4**.
+Names, once: the package name is **`skill-finder-mcp`** (kept in
+`package.json`; the bare `skill-mcp` is taken on npm), the MCP server and its
+bin are **`skill-mcp`**, the plugin id is **`skill-mcp-hint`**. Current
+release: **v0.6.4**.
 
 ## Why
 
@@ -91,8 +92,11 @@ to start with `find`.
 Requires Node.js ≥ 20.
 
 ```sh
-npx -y skill-finder-mcp init
+npm install -g https://github.com/Klaus101-ai/skill-mcp/releases/download/v0.6.4/skill-finder-mcp-0.6.4.tgz
+skill-finder-mcp init
 ```
+
+The tarball comes from the GitHub Release — no npm account needed.
 
 `init` finds your opencode config, adds the MCP server entry and the plugin,
 shows the diff, and writes a `.bak-YYYYMMDD-HHMM` backup before touching
@@ -115,12 +119,15 @@ directly; after a global install you have `skill-finder-mcp` on the PATH).
 To verify the install:
 
 ```sh
-npx -y skill-finder-mcp doctor
+skill-finder-mcp doctor
 ```
 
-`npx` fetches the package when it is not installed; after a global install
-`skill-finder-mcp doctor` does the same. It exits 0 when healthy and names the
-broken piece otherwise.
+After a global install the `skill-finder-mcp` bin is on the PATH; `doctor`
+exits 0 when healthy and names the broken piece otherwise. Without a global
+install, run it by full path to the unpacked package:
+`node <prefix>/node_modules/skill-finder-mcp/dist/cli.mjs doctor` (on Windows
+`<prefix>` is usually `%APPDATA%\npm`; the CLI resolves the package root from
+its own location — `cli/main.mjs:23-28`).
 
 ### Not for you if…
 
@@ -319,13 +326,17 @@ roots.
 ]
 ```
 
-Then restart opencode. From a tarball instead of the registry:
+Then restart opencode. From the release tarball (GitHub Release — no npm
+account):
 
 ```sh
-npm pack
-npm install -g ./skill-finder-mcp-<version>.tgz
+npm install -g https://github.com/Klaus101-ai/skill-mcp/releases/download/v0.6.4/skill-finder-mcp-0.6.4.tgz
 skill-finder-mcp init
 ```
+
+Contributors with a repository checkout can pack the tarball locally instead:
+`npm pack` (runs the build via `prepack`), then
+`npm install -g ./skill-finder-mcp-0.6.4.tgz`.
 
 ### Uninstall and upgrade
 
@@ -333,12 +344,12 @@ To remove the product, drop both entries — the `mcp.skill-mcp` server and the
 `plugins` entry — and restart opencode:
 
 ```sh
-npx -y skill-finder-mcp init --uninstall
+skill-finder-mcp init --uninstall
 ```
 
-To upgrade, update the package (`npm install -g skill-finder-mcp@latest`, or
-let a `npx -y skill-finder-mcp …` command fetch the newest version) and
-restart opencode: config is read once at startup.
+To upgrade, download the newer tarball from the GitHub Releases page, run
+`npm install -g https://github.com/Klaus101-ai/skill-mcp/releases/download/<tag>/skill-finder-mcp-<version>.tgz`
+again, and restart opencode: config is read once at startup.
 
 ## Known limitations
 
@@ -364,10 +375,10 @@ restart opencode: config is read once at startup.
 
 ## Troubleshooting
 
-Run the doctor first:
+To verify the install:
 
 ```sh
-npx -y skill-finder-mcp doctor
+skill-finder-mcp doctor
 ```
 
 It checks Node ≥ 20; your config path and that it parses; the
