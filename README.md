@@ -1,23 +1,47 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/gitshow/banner-dark.svg">
+  <img src="assets/gitshow/banner-light.svg" alt="skill-mcp — one 411-token hint instead of the 52,488-token skill catalog" width="800">
+</picture>
+
 # skill-mcp
 
-A local MCP server and opencode plugin that puts candidate `SKILL.md` files and the likely match in front of the model before it answers.
+**English** · [Русский](README.ru.md)
+
+Your agent has hundreds of skills and ignores them — this hands it the right one, the rest stay out of context.
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![node: 20 or newer](https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen.svg)](https://nodejs.org)
+[![runtime dependencies: 0](https://img.shields.io/badge/runtime_dependencies-0-brightgreen.svg)](package.json)
 
-skill-mcp indexes the `SKILL.md` files already on your machine, searches them when a message arrives, and adds candidates plus the likely match to the request context. Everything runs locally: no network calls, no API keys, no model of its own.
+A local MCP server and an opencode plugin. It indexes the `SKILL.md` files already on your machine, searches them when a message arrives, and puts the candidates plus the likely match into the request context. No network, no API keys, no model of its own.
 
-Three names appear in this document. The package is `skill-finder-mcp` (`package.json`). The MCP server and its CLI bin are `skill-mcp` (`package.json`). The plugin id is `skill-mcp-hint` (`plugin/index.ts`).
+The problem it solves: at each model step opencode lists every registered skill as id, name and description, and nothing more (see the skills guide under Loading). A skill whose description does not overlap the request stays invisible, and a message with no auto-match reads as if no skills exist, so the agent answers from general knowledge instead of opening the skill that fits.
 
-## Why this exists
+## Demo
 
-opencode shows the model only the id, name and description of each skill. A skill whose description does not overlap the request stays invisible, and a message with no auto-match reads as if no skills exist, so the agent answers from general knowledge instead of opening the skill that fits.
+![skill-mcp demo: the full 416-skill catalog is 195,639 chars (~52,488 tokens) per request, the plugin hint is 1,380 chars (~411 tokens) and forms in 4.9 ms](assets/gitshow/demo.png)
 
-## Install
+Two panels from one measured run on 13.11.2026. Left: the catalog of 416 skills in the XML form opencode sends, 195,639 characters or about 52,488 tokens, paid on every request. Right: what the plugin adds for one message, 1,380 characters or about 411 tokens, built in 4.9 ms against a 150 ms budget. Under them are the two parts the plugin emits: the router rule (442 characters) and the `<skill_hint>` block for a Russian contract-review query (938 characters, 4 candidates), copied from the run without edits.
 
-Requires Node.js 20 or newer (`package.json`).
+Both token counts use one estimate, ASCII characters divided by 4 plus non-ASCII divided by 3, so read them as a ratio rather than a tokenizer's answer. The image is assembled from the measured parts, not a terminal screenshot; the terminal run behind the index is below.
 
-Install from a checkout:
+`node cli/smoke.mjs` on 13.11.2026: 416 `SKILL.md` found under 4 roots, index built in 760.7 ms, 5 queries with their top three and the fields that matched. The last query is Russian and comes back in Russian, because the index keeps both sides of the bridge.
+
+## What you get
+
+**The search runs before the answer.** A fixed rule goes to the front of the system prompt on every owner message and makes `find` the agent's first action. The gate backs it in code: until a `find` call is seen for the current message, every other tool call of the main session is refused (`plugin/hint.mjs:89-93`, `plugin/gate.mjs:12-14`).
+
+**One hint instead of the whole catalog.** 1,380 characters (about 411 tokens) against 195,639 characters (about 52,488 tokens) for 416 skills: 52,077 tokens saved on a request, 99.2% less. With the body of the top skill preloaded (11,530 characters, about 3,565 tokens) the request carries about 3,976 tokens, which is still 92.4% less than the catalog. The catalog figure is the XML form of the same list opencode builds, measured on 13.11.2026 with the estimate above.
+
+**Candidates arrive inside the same request.** The hint holds up to 5 candidates in 1000 characters and is built within 150 ms; the preload adds the body of the top confident skill up to 20000 characters (`plugin/hint.mjs:95-97,108`). The measured block used 4 candidates, 938 characters and 4.9 ms.
+
+**Search reads Russian too.** BM25 over skill name, description and headings, plus a fixed RU to EN dictionary in `core/lexicon.ru-en.json`. A Russian query about a complaint to the antitrust service returns `biased-tender-detection` first and `fas-complaint-draft` second, with the Russian stems listed in `why` (`node cli/smoke.mjs`, run of 13.11.2026).
+
+**Local and read-only by construction.** No runtime dependencies (`package.json:45`), no network call in the code, `SKILL.md` files opened read-only, and a path that resolves outside its skill root refused with `E_FORBIDDEN` (`core/sources.mjs:241`).
+
+## Quick start
+
+Requires Node.js 20 or newer (`package.json:8`). The package is not on the npm registry: build the tarball from a checkout.
 
 ```sh
 git clone https://github.com/Klaus101-ai/skill-mcp.git
@@ -28,53 +52,89 @@ npm install -g ./skill-finder-mcp-<version>.tgz
 skill-finder-mcp init
 ```
 
-`npm pack` runs the build first through the `prepack` script, then names the tarball after the package and its version. The package is not published to the npm registry, so the tarball is built on your machine. Use the version from `package.json` in the file name.
+`npm pack` prints the file name with the version from `package.json:3`. `init` finds your opencode config, adds `mcp.skill-mcp` as a local stdio server and the plugin entry, prints the diff and saves a `.bak-YYYYMMDD-HHMM` copy before writing (`cli/main.mjs`). JSONC comments survive the edit, and a second run changes nothing.
 
-`init` finds your opencode config (`~/.config/opencode/opencode.jsonc`, else `.json`), writes `mcp.skill-mcp` as a local stdio server running `dist/server.mjs`, appends `dist/plugin` to `plugins`, prints the diff and saves a `.bak-YYYYMMDD-HHMM` copy before writing (`cli/main.mjs`). JSONC comments survive the edit, and a second run changes nothing.
-
-| Option | Effect |
-| --- | --- |
-| `--config <path>` | edit this config file instead of the global one |
-| `--dry-run` | print the diff, write nothing |
-| `--yes` | apply without the interactive prompt |
-| `--uninstall` | remove the `mcp` entry and the plugin entry |
-
-Without a terminal, `init` needs `--yes`. Restart opencode afterwards: config is read once at startup.
-
-## Quick start
+Then check the whole chain and restart opencode:
 
 ```sh
 skill-finder-mcp doctor
 ```
 
-`doctor` checks Node, the config file, the MCP entry and the server file it points at, the plugin entry and the `index.mjs` inside the plugin directory, the skill roots, and a probe search. It also reports the plugin config path, the `SKILL_MCP_*` variables it sees and the `opencode` version on `PATH`. Exit code 0 means every check passed (`cli/main.mjs`).
+`doctor` checks Node, the config file, the MCP entry and the server file it points at, the plugin entry and the `index.mjs` inside the plugin directory, the skill roots and a probe search. Exit code 0 means every check passed (`cli/main.mjs`).
 
-Send a normal task in opencode, for example `review my supply contract`. The first request carries the router rule, so the agent calls `find` before it starts working. Candidates, and the likely match when one exists, arrive with that same request.
+## Hide the built-in skill list
 
-## Example
+The list costs more than the hint. opencode writes the id, name and description of every permitted skill into the model's context at each step, and the 52,488-token figure above is that list for 416 skills. Two supported ways take it out, and skill-mcp keeps working with either.
+
+There is no key that only stops the list. The `skills` array in `opencode.json` adds sources, it does not hide anything (`@opencode/schema/dist/config.d.ts:69`).
+
+**1. Deny the `skill` action.** All skills leave the model's list, and loading by ID is rejected:
+
+```json
+{
+  "permissions": [
+    { "action": "skill", "resource": "*", "effect": "deny" }
+  ]
+}
+```
+
+Rules run in order and the last match wins, so a narrower `allow` placed after this line lets one skill back in. The shape of the triple is in the config schema (`@opencode/schema/dist/config.d.ts:47-55`), the behaviour in the skills guide under [Permissions](https://opencode.ai/docs/skills). The agent can still read a skill body through `outline` and `read-section`, which open the file themselves (`server/index.mjs:100,113`).
+
+**2. Mark skills `autoinvoke: false`.** The skill stays registered and loadable by ID, and drops out of the model's list. In a skill's frontmatter:
+
+```yaml
+metadata:
+  opencode/autoinvoke: false
+```
+
+`disable-model-invocation: true` has the same effect. From a plugin, `ctx.skill.transform(...)` sets the same field on a loaded skill and `ctx.skill.reload()` applies it (`node_modules/@opencode/plugin/dist/promise/skill.d.ts:13-14`; the field is `Skill.Info.autoinvoke` in `@opencode/schema/dist/skill.d.ts:25`).
+
+Before you switch either one on:
+
+- Built-in skills ship inside opencode and have no directory under any skill root. A deny removes them, and skill-mcp cannot index them because there is no file to walk. In the run above, all 416 indexed skills came from the four roots on disk.
+- skill-mcp indexes files named `SKILL.md` only (`core/sources.mjs:174`). A flat `<root>/name.md` skill never appears in its results, and once the list is hidden it is invisible to the agent.
+- The roots are the six paths under Configuration, all home or project scoped. A project `.claude/skills` or `.agents/skills` directory is not read, so skills that live only there have no fallback either (`core/sources.mjs:16-23`).
+- Restart opencode after a config change. The list is built at load, not per message.
+
+This section comes from the official documentation, read on 13.11.2026, and the permission triple was checked against the schema files. Neither recipe was exercised in a live run on this machine.
+
+## How it works
+
+The plugin adds three things to a request, all from the same index.
+
+- `rule`: a fixed instruction block unshifted to the front of the system prompt on every owner message. It tells the agent to call `find` first and states that a missing hint block means no auto-match, not an empty skill folder. The rule fires even when nothing matched, and a marker keeps it to one copy per request.
+- `preload`: the body of the top confident candidate, up to 20000 characters, as a `<skill_content>` part.
+- `hint`: up to 5 candidates as a `<skill_hint>` part, 1000 characters max, built inside a 150 ms budget. Candidates without confidence are marked in the block.
+
+The index warms up when the plugin loads, so the first request pays for a search rather than a full walk. A query that matches no skill produces no hint and no preload; the rule still goes in.
+
+## Find gate
+
+Until a `find` call is seen for the current owner message, the main session gets every other tool call refused. The refusal starts with `skill-mcp gate` and names the call to make.
+
+These calls pass without `find`:
+
+- `sequential_thinking`, `todowrite`, `todoread`, `question`, `skill`, `subagent` and `task` (`plugin/gate.mjs:54`);
+- `execute` whose code calls `find`;
+- `execute` whose code calls `sequential_thinking` and nothing else;
+- every call in a subagent session, which is outside the gate.
+
+A new owner message is recognised by the number of user messages plus the text of the last one; a new signature closes the gate again. Unreadable session state or an `execute` payload the gate cannot read allows the call instead of refusing it, which is the fail-open contract (`plugin/gate.mjs:14-15`). A missing or malformed config file does not: it leaves the gate on, which is the default. `SKILL_MCP_GATE=off` or `"gate": false` removes the layer.
+
+## MCP server tools
+
+| Tool | Arguments | Limits |
+| --- | --- | --- |
+| `find` | `query` (required), `limit`, `restrict_to` | `limit` 1 to 10, default 10; `restrict_to` takes names or globs |
+| `outline` | `name`, or `path` to a `SKILL.md` | frontmatter plus headings with line numbers, 40 headings max, then `truncated: true` |
+| `read-section` | `name`, `heading`, `max_lines` | `heading` is text or its 1-based number; `max_lines` 1 to 600, default 150 |
+
+Three tools, declared in `server/index.mjs:60,100,113`. The server speaks JSON-RPC 2.0 on stdio, one message per line, and exits when stdin closes. Every tool schema declares `additionalProperties: false`, and arguments are type-checked before a search runs. Failures come back either as a JSON-RPC code (-32700 through -32603) or as a tool error: `E_INVALID_INPUT`, `E_NOT_FOUND`, `E_FORBIDDEN`, `E_SECTION_NOT_FOUND`, `E_UNAVAILABLE`. The index is built on first use and cached for the life of the process.
 
 A `find` call over stdio, as the agent makes it:
 
 ```json
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find","arguments":{"query":"review a supply contract","limit":3}}}
-```
-
-The answer, with placeholder skills:
-
-```json
-{
-  "ok": true,
-  "items": [
-    {
-      "name": "supply-contract-review",
-      "path": ".../skills/supply-contract-review/SKILL.md",
-      "score": 31.42,
-      "why": "matched name+description: contract, review",
-      "description": "Checks a supply contract against the playbook: payment terms, penalties, delivery.",
-      "confident": true
-    }
-  ]
-}
 ```
 
 Every item carries `confident` and the skill `description`, so the model can judge the list without another call. A top-level `next` tells it what to do with the result: load the likely match, or compare the descriptions before loading. `why` names the fields that matched and the terms that hit them.
@@ -123,58 +183,17 @@ The walker reads these directories, and only when they exist:
 - `~/.agents/skills`
 - `<project>/.opencode/skills`
 
-It skips `node_modules`, `.git` and backup directories; the match is on a whole directory name. Skill files are opened read-only, and a resolved path that escapes its root is refused with `E_FORBIDDEN`.
-
-## MCP server tools
-
-| Tool | Arguments | Limits |
-| --- | --- | --- |
-| `find` | `query` (required), `limit`, `restrict_to` | `limit` 1 to 10, default 10; `restrict_to` takes names or globs |
-| `outline` | `name`, or `path` to a `SKILL.md` | frontmatter plus headings with line numbers, 40 headings max, then `truncated: true` |
-| `read-section` | `name`, `heading`, `max_lines` | `heading` is text or its 1-based number; `max_lines` 1 to 600, default 150 |
-
-`read-section` returns the heading line through the next heading of the same level.
-
-The server speaks JSON-RPC 2.0 on stdio, one message per line, and exits when stdin closes. Every tool schema declares `additionalProperties: false`, and arguments are type-checked before a search runs. Failures come back either as a JSON-RPC code (-32700 through -32603) or as a tool error: `E_INVALID_INPUT`, `E_NOT_FOUND`, `E_FORBIDDEN`, `E_SECTION_NOT_FOUND`, `E_UNAVAILABLE`. The index is built on first use and cached for the life of the process.
-
-Scoring is BM25 over the skill name, description, headings and bilingual aliases. There is no score cutoff: every hit comes back ranked, and `confident` marks the positions that cover enough significant query tokens.
-
-## Plugin layers
-
-The plugin adds three things to a request, all from the same index.
-
-- `rule`: a fixed instruction block unshifted to the front of the system prompt on every owner message. It tells the agent to call `find` first and states that a missing hint block means no auto-match, not an empty skill folder. The rule fires even when nothing matched, and a marker keeps it to one copy per request.
-- `preload`: the body of the top confident candidate, up to 20000 characters, as a `<skill_content>` part.
-- `hint`: up to 5 candidates as a `<skill_hint>` part, 1000 characters max, built inside a 150 ms budget. Candidates without confidence are marked in the block.
-
-The index warms up when the plugin loads, so the first request pays for a search rather than a full walk. A query that matches no skill produces no hint and no preload; the rule still goes in.
-
-## Find gate
-
-Until a `find` call is seen for the current owner message, the main session gets every other tool call refused. The refusal starts with `skill-mcp gate` and names the call to make.
-
-These calls pass without `find`:
-
-- `sequential_thinking`, `todowrite`, `todoread`, `question`, `skill`, `subagent` and `task`;
-- `execute` whose code calls `find`;
-- `execute` whose code calls `sequential_thinking` and nothing else;
-- every call in a subagent session, which is outside the gate.
-
-A new owner message is recognised by the number of user messages plus the text of the last one; a new signature closes the gate again. Unreadable session state or an `execute` payload the gate cannot read allows the call instead of refusing it. A missing or malformed config file does not: it leaves the gate on, which is the default. `SKILL_MCP_GATE=off` or `"gate": false` removes the layer.
-
-The gate sees tool calls only. A reply written without tools is not intercepted, and the rule text is the only thing asking for a search there.
-
-## Isolation
-
-The plugin exports a plain object with `id` and `setup`. `@opencode/plugin` is imported dynamically inside a `.catch`, kept external in the build and declared as an optional peer dependency, so the bundle loads with or without it. Each hook registration sits in its own `try`/`catch`, and `setup` itself cannot throw: a broken hook degrades that hook, it never takes the session down. Diagnostics stay off unless `SKILL_MCP_DEBUG=1`. `test/plugin-shape.test.mjs` holds the export shape and the no-throw promise.
+It skips `node_modules`, `.git` and backup directories; the match is on a whole directory name (`core/sources.mjs:11`).
 
 ## Limitations
 
 - Search is lexical. A request that shares no token with the name, description or headings of a skill will not find it.
 - The RU to EN bridge is a fixed dictionary in `core/lexicon.ru-en.json`. Words outside it get no translation help.
 - Candidate quality follows your frontmatter descriptions. A one-line description produces a thin hint.
-- The gate covers tool calls only; see the note at the end of the find gate section.
+- On the final acceptance set of 60 queries, recall@5 is 0.7600, the same as the lexical baseline, and NDCG@10 is 0.6274 against 0.6654 for that baseline (`measure/README.md`). The hint and the gate are the value; the ranking is not better than BM25.
 - Latency figures in `measure/README.md` come from one machine and a 365-skill corpus. Treat them as a reference, not a promise.
+- The gate covers tool calls only. A reply written without tools is not intercepted, and the rule text is the only thing asking for a search there.
+- One test fails, so the suite is not green (see Development).
 - There is no CI workflow in the repository. Tests run where you run them.
 
 ## Troubleshooting
@@ -185,6 +204,8 @@ A refusal that keeps coming back is a gate question, not a search question. Set 
 
 No hint block in a request usually means no confident candidate for that message, or `SKILL_MCP_HINT=off` in the environment of the process that runs opencode. `SKILL_MCP_DEBUG=1` prints what the plugin decided to stderr.
 
+If you turned on the skill permission from the section above, remember that the `skill` tool no longer loads anything. The hint still points at skill names; `read-section` reads the body from disk.
+
 ## Development
 
 ```sh
@@ -193,7 +214,9 @@ npm run build
 npm test
 ```
 
-`npm test` runs `node --test` over `test/`. The suite spawns the server, drives the CLI as a child process, and covers the gate, isolation, the bilingual bridge, packaging and the router rule. `npm run smoke` runs the smoke script, `npm run measure` and `npm run latency` regenerate the numbers in `measure/README.md`.
+`npm test` runs `node --test` over `test/`. On 13.11.2026 it reported 224 tests: 222 pass, 1 fail, 1 skipped. The failure is `test/pack.test.mjs:57`: `npm pack` picks up `README.md.bak-20261105-2124` and `README.ru.md`, both outside the allowed file set. Move the backup into `_backups/` and decide whether `README.ru.md` belongs in the package; until then the suite exits non-zero and this README does not claim otherwise.
+
+`npm run smoke` runs the smoke script, which prints the skill count, the index build time and five queries with their top three (`cli/smoke.mjs`). `npm run measure` and `npm run latency` regenerate the numbers in `measure/README.md`.
 
 The build uses esbuild with `node20` as the target and produces `dist/plugin.mjs`, `dist/plugin/index.mjs`, `dist/server.mjs`, `dist/cli.mjs` and `dist/lexicon.ru-en.json`.
 
